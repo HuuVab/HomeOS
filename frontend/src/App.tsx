@@ -76,7 +76,7 @@ export default function App() {
   useEffect(() => {
 	if (!session) return
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 15_000)
+    const timer = window.setInterval(() => void refresh(), 1_000)
     return () => window.clearInterval(timer)
   }, [refresh, session])
 
@@ -178,7 +178,7 @@ export default function App() {
       </section>
 
       <footer>
-        <span>Automatic refresh every 15 seconds</span>
+        <span>Automatic refresh every second</span>
         <span>{data ? `Last successful update: ${new Date(data.sampledAt).toLocaleTimeString()}` : 'Awaiting first update'}</span>
       </footer>
     </main>
