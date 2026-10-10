@@ -11,6 +11,7 @@ import (
 
 	"github.com/HuuVab/HomeOS/backend/internal/api"
 	"github.com/HuuVab/HomeOS/backend/internal/auth"
+	"github.com/HuuVab/HomeOS/backend/internal/monitor"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 	"golang.org/x/term"
 )
@@ -67,7 +68,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           api.NewHandler(os.Getenv("HOMEOS_WEB_DIR"), db),
+		Handler:           api.NewHandler(os.Getenv("HOMEOS_WEB_DIR"), db, monitor.NewCollector(dataDir)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("HomeOS listening on http://%s", addr)

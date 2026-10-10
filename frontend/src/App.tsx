@@ -13,6 +13,8 @@ type Metric = {
   scope: 'application' | 'container' | 'host'
   state: 'available' | 'stale' | 'unavailable'
   sampledAt: string
+  detail?: string
+  reason?: string
 }
 
 type Status = {
@@ -24,6 +26,7 @@ type Status = {
 
 function formatMetric(metric: Metric): string {
   if (metric.state !== 'available') return 'Unavailable'
+  if (metric.unit === 'percent') return `${metric.value.toFixed(1)}%`
   if (metric.unit === 'bytes') return `${(metric.value / 1024 / 1024).toFixed(1)} MiB`
   if (metric.unit === 'seconds') {
     const seconds = Math.floor(metric.value)
@@ -151,7 +154,7 @@ export default function App() {
         <div>
           <p className="eyebrow">System overview</p>
           <h2>{loading ? 'Connecting…' : error ? 'Connection needs attention' : 'Application is healthy'}</h2>
-          <p>{error ?? 'Live measurements from the HomeOS application.'}</p>
+          <p>{error ?? 'Live measurements from your Windows host and HomeOS.'}</p>
         </div>
         <div className={`status-pill ${error ? 'status-error' : ''}`}>
           <span className="status-dot" /> {error ? 'Unavailable' : loading ? 'Checking' : 'Online'}
@@ -161,16 +164,17 @@ export default function App() {
       <div className="section-heading">
         <div>
           <p className="eyebrow">Live status</p>
-          <h2>Application metrics</h2>
+          <h2>System metrics</h2>
         </div>
         <button type="button" onClick={() => void refresh()}>Refresh now</button>
       </div>
 
-      <section className="cards" aria-label="Application metrics">
+      <section className="cards" aria-label="System metrics">
         {data?.metrics.map((metric) => (
           <article className="card" key={metric.id}>
             <div className="card-top"><span>{metric.label}</span><span className="scope">{metric.scope}</span></div>
             <p className="value">{formatMetric(metric)}</p>
+            {(metric.detail || metric.reason) && <p className="metric-detail">{metric.detail ?? metric.reason}</p>}
             <p className="card-foot">Updated {new Date(metric.sampledAt).toLocaleTimeString()}</p>
           </article>
         ))}

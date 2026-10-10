@@ -58,6 +58,6 @@ cd ..\frontend
 npm run build
 ```
 
-The status endpoint reports only application scope metrics: process uptime and Go heap allocation. It does not claim to measure total host or container resource use.
+On native Windows, the status endpoint reports host CPU usage, physical memory usage, and usage of the disk containing the HomeOS data directory. It also reports application uptime and Go heap allocation. The dashboard labels every sample by scope. On other platforms, host metrics are marked unavailable until a platform-specific collector is implemented; the app does not present container metrics as host metrics.
 
 Sessions expire after 24 hours. Login attempts are limited to 10 per source IP per minute. Passwords use Argon2id with 19 MiB of memory, two iterations, one thread, and a unique random salt. Session cookies are `HttpOnly` and `SameSite=Strict`; they are marked `Secure` when the Go server handles HTTPS directly. The database file and its `-wal`/`-shm` companions must be backed up together using a SQLite-aware backup procedure while the app is running, or after stopping the app.

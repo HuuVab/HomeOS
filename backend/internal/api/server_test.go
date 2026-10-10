@@ -1,14 +1,17 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/auth"
+	"github.com/HuuVab/HomeOS/backend/internal/monitor"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
 
@@ -26,7 +29,13 @@ func testHandler(t *testing.T) (http.Handler, *store.Store) {
 	if err := db.CreateAdmin("test_admin", hash); err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler("", db), db
+	return NewHandler("", db, testCollector{}), db
+}
+
+type testCollector struct{}
+
+func (testCollector) Collect(context.Context) []monitor.Metric {
+	return []monitor.Metric{{ID: "host_cpu", Label: "CPU usage", Value: 12.5, Unit: "percent", Scope: "host", State: "available", SampledAt: time.Now().UTC()}}
 }
 
 func TestAuthenticationAndStatus(t *testing.T) {
@@ -70,11 +79,11 @@ func TestAuthenticationAndStatus(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Status != "healthy" || len(payload.Metrics) != 2 {
+	if payload.Status != "healthy" || len(payload.Metrics) != 3 {
 		t.Fatalf("unexpected status response: %+v", payload)
 	}
 	for _, sample := range payload.Metrics {
-		if sample.Scope != "application" || sample.State != "available" || sample.SampledAt.IsZero() {
+		if sample.State != "available" || sample.SampledAt.IsZero() || (sample.Scope != "application" && sample.Scope != "host") {
 			t.Errorf("invalid metric: %+v", sample)
 		}
 	}

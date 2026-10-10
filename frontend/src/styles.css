@@ -26,6 +26,7 @@ button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
 .value { font-size: 2.35rem; letter-spacing: -.05em; font-weight: 750; margin-top: 24px; }
 .card-foot, .empty, footer { color: #9fb1ba; font-size: .88rem; }
 .card-foot { margin-top: 14px; }
+.metric-detail { color: #b9cbd2; font-size: .9rem; margin-top: 7px; }
 footer { border-top: 1px solid #2a3c46; padding-top: 22px; margin-top: 52px; }
 @media (max-width: 650px) { .shell { padding: 26px 18px; } .header { margin-bottom: 36px; } .overview, .section-heading, footer { align-items: flex-start; flex-direction: column; } .overview { padding: 25px; } .section-heading { gap: 17px; } }
 .header-actions { display: flex; align-items: center; gap: 12px; }

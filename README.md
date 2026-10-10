@@ -12,7 +12,7 @@ The proposed foundation is:
 
 ## Project status
 
-HomeOS is in early v0.1 development. It currently has a loopback-only Go API, SQLite-backed administrator authentication, and a React status dashboard. Deployment packaging and broader monitoring are still to come.
+HomeOS is in early v0.1 development. It currently has a loopback-only Go API, SQLite-backed administrator authentication, and a React dashboard with native Windows host metrics. Deployment packaging and broader monitoring are still to come.
 
 The first milestone (`v0.1`) will focus on HomeCore, authentication, the dashboard, and basic monitoring. See the [project concept and technical design report](HomeOS_Project_Report.md) for the full scope, architecture, roadmap, and risks.
 

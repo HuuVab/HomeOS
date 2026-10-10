@@ -9,20 +9,13 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/HuuVab/HomeOS/backend/internal/monitor"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
 
 var startedAt = time.Now()
 
-type metric struct {
-	ID        string    `json:"id"`
-	Label     string    `json:"label"`
-	Value     float64   `json:"value"`
-	Unit      string    `json:"unit"`
-	Scope     string    `json:"scope"`
-	State     string    `json:"state"`
-	SampledAt time.Time `json:"sampledAt"`
-}
+type metric = monitor.Metric
 
 type statusResponse struct {
 	Status    string    `json:"status"`
@@ -31,7 +24,7 @@ type statusResponse struct {
 	Metrics   []metric  `json:"metrics"`
 }
 
-func NewHandler(webDir string, db *store.Store) http.Handler {
+func NewHandler(webDir string, db *store.Store, collector monitor.Collector) http.Handler {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, db)
 	mux.HandleFunc("GET /api/v1/health/live", func(w http.ResponseWriter, _ *http.Request) {
@@ -53,12 +46,14 @@ func NewHandler(webDir string, db *store.Store) http.Handler {
 		var memory runtime.MemStats
 		runtime.ReadMemStats(&memory)
 		now := time.Now().UTC()
+		samples := collector.Collect(r.Context())
+		samples = append(samples,
+			metric{ID: "uptime", Label: "Uptime", Value: time.Since(startedAt).Seconds(), Unit: "seconds", Scope: "application", State: "available", SampledAt: now},
+			metric{ID: "go_heap", Label: "Go heap", Value: float64(memory.HeapAlloc), Unit: "bytes", Scope: "application", State: "available", SampledAt: now},
+		)
 		writeJSON(w, http.StatusOK, statusResponse{
 			Status: "healthy", Version: "0.1.0-dev", SampledAt: now,
-			Metrics: []metric{
-				{ID: "uptime", Label: "Uptime", Value: time.Since(startedAt).Seconds(), Unit: "seconds", Scope: "application", State: "available", SampledAt: now},
-				{ID: "go_heap", Label: "Go heap", Value: float64(memory.HeapAlloc), Unit: "bytes", Scope: "application", State: "available", SampledAt: now},
-			},
+			Metrics: samples,
 		})
 	})
 
