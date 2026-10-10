@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -53,5 +54,29 @@ func TestAdminPersistsAndResetRevokesSessions(t *testing.T) {
 	}
 	if _, _, err := db.Session("test-token-hash"); err == nil {
 		t.Fatal("password reset did not revoke existing session")
+	}
+	backupPath := filepath.Join(t.TempDir(), "backup.sqlite")
+	if err := db.Backup(backupPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Backup(backupPath); err == nil {
+		t.Fatal("backup overwrote an existing file")
+	}
+	backupBytes, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredPath := filepath.Join(t.TempDir(), "restored.sqlite")
+	if err := os.WriteFile(restoredPath, backupBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Open(restoredPath)
+	if err != nil {
+		t.Fatalf("open restored backup: %v", err)
+	}
+	defer restored.Close()
+	restoredAdmin, err := restored.UserByUsername("admin_test")
+	if err != nil || !auth.VerifyPassword(restoredAdmin.PasswordHash, "second-test-password") {
+		t.Fatalf("restored administrator missing or invalid: %v", err)
 	}
 }

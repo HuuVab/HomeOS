@@ -1,0 +1,17 @@
+.git
+.github
+.vscode
+.idea
+backend/bin
+backend/data
+backend/coverage.out
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/*.tsbuildinfo
+data
+docs
+tests
+*.log
+.env
+.env.*

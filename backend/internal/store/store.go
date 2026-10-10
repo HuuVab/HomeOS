@@ -20,7 +20,10 @@ var migrations embed.FS
 var ErrAdminExists = errors.New("an administrator already exists")
 var ErrAdminNotFound = errors.New("administrator not found")
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db   *sql.DB
+	path string
+}
 
 type User struct {
 	ID           int64  `json:"id"`
@@ -31,10 +34,14 @@ type User struct {
 }
 
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve database path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", absPath)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -45,7 +52,7 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("configure sqlite: %w", err)
 		}
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, path: absPath}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
@@ -98,6 +105,42 @@ func (s *Store) migrate() error {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) Ready(ctx context.Context) error { return s.db.PingContext(ctx) }
+
+// Backup creates a consistent SQLite snapshot while the application is running.
+// The destination must be a new file so an existing backup cannot be replaced.
+func (s *Store) Backup(destination string) error {
+	absPath, err := filepath.Abs(destination)
+	if err != nil {
+		return fmt.Errorf("resolve backup path: %w", err)
+	}
+	if strings.EqualFold(absPath, s.path) {
+		return errors.New("backup path must differ from the live database")
+	}
+	if _, err := os.Lstat(absPath); err == nil {
+		return errors.New("backup path already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("check backup path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
+		return fmt.Errorf("create backup directory: %w", err)
+	}
+	if _, err := s.db.Exec(`VACUUM INTO ?`, absPath); err != nil {
+		return fmt.Errorf("create SQLite backup: %w", err)
+	}
+	backupDB, err := sql.Open("sqlite", absPath)
+	if err != nil {
+		return fmt.Errorf("open backup for verification: %w", err)
+	}
+	defer backupDB.Close()
+	var result string
+	if err := backupDB.QueryRow(`PRAGMA integrity_check`).Scan(&result); err != nil {
+		return fmt.Errorf("verify backup: %w", err)
+	}
+	if result != "ok" {
+		return fmt.Errorf("backup integrity check failed: %s", result)
+	}
+	return nil
+}
 
 func (s *Store) CreateAdmin(username, passwordHash string) error {
 	now := time.Now().Unix()

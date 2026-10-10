@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,11 +24,27 @@ func main() {
 	if dataDir == "" {
 		dataDir = "data"
 	}
-	db, err := store.Open(filepath.Join(dataDir, "homeos.sqlite"))
+	dbPath := filepath.Join(dataDir, "homeos.sqlite")
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if _, err := os.Stat(dbPath); err != nil {
+			log.Fatal("live database does not exist: ", err)
+		}
+	}
+	db, err := store.Open(dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if len(os.Args) != 3 {
+			log.Fatal("usage: homeos backup <new-backup-path>")
+		}
+		if err := db.Backup(os.Args[2]); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Database backup created and verified.")
+		return
+	}
 
 	if len(os.Args) > 1 && (os.Args[1] == "create-admin" || os.Args[1] == "reset-admin-password") {
 		if len(os.Args) != 3 || !validUsername.MatchString(os.Args[2]) {
@@ -58,13 +75,18 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 {
-		log.Fatal("usage: homeos [create-admin|reset-admin-password <username>]")
+		log.Fatal("usage: homeos [create-admin <username> | reset-admin-password <username> | backup <new-backup-path>]")
 	}
 
-	addr := "127.0.0.1:8080"
-	if port := os.Getenv("HOMEOS_PORT"); port != "" {
-		addr = "127.0.0.1:" + port
+	bindAddress := os.Getenv("HOMEOS_BIND_ADDR")
+	if bindAddress == "" {
+		bindAddress = "127.0.0.1"
 	}
+	port := "8080"
+	if configuredPort := os.Getenv("HOMEOS_PORT"); configuredPort != "" {
+		port = configuredPort
+	}
+	addr := net.JoinHostPort(bindAddress, port)
 
 	server := &http.Server{
 		Addr:              addr,
