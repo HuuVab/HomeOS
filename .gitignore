@@ -21,6 +21,7 @@ frontend/.vite/
 
 # Go
 backend/bin/
+backend/data/
 backend/coverage.out
 *.test
 

@@ -1,6 +1,6 @@
 # Local development
 
-This is the first v0.1 code slice: a loopback-only Go API and a React dashboard with application-scoped status samples. Authentication and SQLite are not implemented yet. Do not expose this development build on a LAN or the Internet.
+This v0.1 development build includes a loopback-only Go API, SQLite-backed administrator authentication, and a React dashboard with application-scoped status samples. Do not expose this development build on a LAN or the Internet.
 
 ## Prerequisites
 
@@ -9,7 +9,18 @@ This is the first v0.1 code slice: a loopback-only Go API and a React dashboard 
 
 ## Run
 
-In one terminal:
+First, create the administrator in a terminal. The command prompts for the password without echoing it:
+
+```powershell
+cd backend
+go run ./cmd/homeos create-admin <username>
+```
+
+The SQLite database is created at `backend/data/homeos.sqlite` by default. This directory is ignored by Git. Do not commit database files or backups.
+
+If administrator access is lost, run `go run ./cmd/homeos reset-admin-password <username>` locally. It prompts for a new password and revokes existing sessions.
+
+Then start the API in one terminal:
 
 ```powershell
 cd backend
@@ -24,7 +35,7 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. Vite proxies `/api` to the Go server on `127.0.0.1:8080`.
+Open the local URL printed by Vite and sign in with the administrator credentials. Vite proxies `/api` to the Go server on `127.0.0.1:8080`.
 
 To build the static frontend and serve it from Go:
 
@@ -48,3 +59,5 @@ npm run build
 ```
 
 The status endpoint reports only application scope metrics: process uptime and Go heap allocation. It does not claim to measure total host or container resource use.
+
+Sessions expire after 24 hours. Login attempts are limited to 10 per source IP per minute. Passwords use Argon2id with 19 MiB of memory, two iterations, one thread, and a unique random salt. Session cookies are `HttpOnly` and `SameSite=Strict`; they are marked `Secure` when the Go server handles HTTPS directly. The database file and its `-wal`/`-shm` companions must be backed up together using a SQLite-aware backup procedure while the app is running, or after stopping the app.

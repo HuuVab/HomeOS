@@ -28,3 +28,16 @@ button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
 .card-foot { margin-top: 14px; }
 footer { border-top: 1px solid #2a3c46; padding-top: 22px; margin-top: 52px; }
 @media (max-width: 650px) { .shell { padding: 26px 18px; } .header { margin-bottom: 36px; } .overview, .section-heading, footer { align-items: flex-start; flex-direction: column; } .overview { padding: 25px; } .section-heading { gap: 17px; } }
+.header-actions { display: flex; align-items: center; gap: 12px; }
+.secondary-button { background: #263b45; color: #d9e8eb; border: 1px solid #46616a; }
+.secondary-button:hover { background: #344f58; }
+.login-shell { max-width: 580px; padding-top: min(12vh, 120px); }
+.login-card { margin-top: 38px; padding: 32px; background: #1a2832; border: 1px solid #31434d; border-radius: 18px; }
+.login-intro { margin-top: 10px; color: #aebec6; }
+form { display: flex; flex-direction: column; margin-top: 26px; }
+label { margin: 0 0 8px; font-weight: 650; }
+input { width: 100%; border: 1px solid #46616a; border-radius: 9px; background: #101e26; color: #e9eef2; padding: 12px 13px; font: inherit; margin-bottom: 20px; }
+input:focus-visible { outline: 3px solid #8be4c5; outline-offset: 1px; }
+form button { margin-top: 4px; }
+button:disabled { opacity: .65; cursor: wait; }
+.form-error { color: #ffc5bd; margin: -5px 0 17px; }

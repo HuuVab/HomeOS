@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
 
 var startedAt = time.Now()
@@ -28,16 +31,25 @@ type statusResponse struct {
 	Metrics   []metric  `json:"metrics"`
 }
 
-func NewHandler(webDir string) http.Handler {
+func NewHandler(webDir string, db *store.Store) http.Handler {
 	mux := http.NewServeMux()
+	registerAuthRoutes(mux, db)
 	mux.HandleFunc("GET /api/v1/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "alive"})
 	})
-	mux.HandleFunc("GET /api/v1/health/ready", func(w http.ResponseWriter, _ *http.Request) {
-		// Database readiness joins this check when SQLite is added.
+	mux.HandleFunc("GET /api/v1/health/ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+		defer cancel()
+		if err := db.Ready(ctx); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "not_ready", "Service is not ready")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
-	mux.HandleFunc("GET /api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/v1/status", func(w http.ResponseWriter, r *http.Request) {
+		if _, _, _, ok := authenticate(w, r, db); !ok {
+			return
+		}
 		var memory runtime.MemStats
 		runtime.ReadMemStats(&memory)
 		now := time.Now().UTC()
@@ -56,6 +68,7 @@ func NewHandler(webDir string) http.Handler {
 			mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/" {
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Header().Set("Cache-Control", "no-store")
 					_, _ = w.Write(index)
 					return
 				}
@@ -63,7 +76,14 @@ func NewHandler(webDir string) http.Handler {
 			})
 		}
 	}
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func writeError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
