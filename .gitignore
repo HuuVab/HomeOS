@@ -1,0 +1,48 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Go
+backend/bin/
+backend/coverage.out
+*.test
+
+# Python workers
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Runtime data (keep user content and databases out of Git)
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs, coverage, and temporary files
+*.log
+coverage/
+tmp/
+temp/
+
+# Local deployment overrides
+docker-compose.override.yml
