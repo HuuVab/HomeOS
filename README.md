@@ -16,6 +16,8 @@ HomeOS is currently in the concept and planning stage. Development has not start
 
 The first milestone (`v0.1`) will focus on HomeCore, authentication, the dashboard, and basic monitoring. See the [project concept and technical design report](HomeOS_Project_Report.md) for the full scope, architecture, roadmap, and risks.
 
+The [v0.1 requirements and acceptance checklist](docs/v0.1-requirements.md) defines the first buildable milestone.
+
 ## Planned repository layout
 
 ```text
