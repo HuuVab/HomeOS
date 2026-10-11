@@ -262,7 +262,13 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		if !check(w, r, false) {
 			return
 		}
-		entries, err := files.ListTrash()
+		var entries []drive.TrashEntry
+		var err error
+		if db.AuthoritativeMetadata() {
+			entries, err = db.TrashEntries(ownerID)
+		} else {
+			entries, err = files.ListTrash()
+		}
 		if err != nil {
 			driveError(w, err)
 			return
@@ -273,6 +279,12 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		if !check(w, r, true) {
 			return
 		}
+		if db.AuthoritativeMetadata() {
+			if _, err := db.TrashEntry(ownerID, r.PathValue("id")); err != nil {
+				driveError(w, err)
+				return
+			}
+		}
 		if err := files.Restore(r.PathValue("id")); err != nil {
 			driveError(w, err)
 			return
@@ -282,6 +294,12 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 	mux.HandleFunc("DELETE /api/v1/drive/trash/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, true) {
 			return
+		}
+		if db.AuthoritativeMetadata() {
+			if _, err := db.TrashEntry(ownerID, r.PathValue("id")); err != nil {
+				driveError(w, err)
+				return
+			}
 		}
 		if err := files.DeleteForever(r.PathValue("id")); err != nil {
 			driveError(w, err)
