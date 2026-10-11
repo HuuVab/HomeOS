@@ -80,3 +80,91 @@ func TestPathsStayInsideRoot(t *testing.T) {
 	}
 	got.Close()
 }
+
+func TestResumableUploadSurvivesRestart(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "files")
+	files, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := strings.Repeat("a", 64)
+	session, err := files.StartUpload("large.txt", 11, fingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offset, err := files.AppendChunk(session.ID, 0, strings.NewReader("hello ")); err != nil || offset != 6 {
+		t.Fatalf("first chunk: %d, %v", offset, err)
+	}
+	if entries, err := files.List(""); err != nil || len(entries) != 0 {
+		t.Fatalf("unfinished file listed: %v, %v", entries, err)
+	}
+	if _, err := files.Open("large.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unfinished file opened: %v", err)
+	}
+	if err := files.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err = New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	resumed, err := files.StartUpload("large.txt", 11, fingerprint)
+	if err != nil || resumed.ID != session.ID || resumed.Offset != 6 {
+		t.Fatalf("resume: %+v, %v", resumed, err)
+	}
+	if _, err := files.StartUpload("large.txt", 11, strings.Repeat("b", 64)); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("different file resumed: %v", err)
+	}
+	if _, err := files.AppendChunk(session.ID, 0, strings.NewReader("bad")); !errors.Is(err, ErrOffset) {
+		t.Fatalf("wrong offset: %v", err)
+	}
+	if err := files.FinishUpload(session.ID); !errors.Is(err, ErrOffset) {
+		t.Fatalf("early finish: %v", err)
+	}
+	if offset, err := files.AppendChunk(session.ID, 6, strings.NewReader("world")); err != nil || offset != 11 {
+		t.Fatalf("second chunk: %d, %v", offset, err)
+	}
+	if err := files.FinishUpload(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := files.List("")
+	if err != nil || len(entries) != 1 || entries[0].Name != "large.txt" {
+		t.Fatalf("completed file not listed: %v, %v", entries, err)
+	}
+	file, err := files.Open("large.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	content, err := io.ReadAll(file)
+	if err != nil || string(content) != "hello world" {
+		t.Fatalf("content: %q, %v", content, err)
+	}
+}
+
+func TestChunkFailureKeepsOffset(t *testing.T) {
+	files, err := New(filepath.Join(t.TempDir(), "files"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	session, err := files.StartUpload("sample", 10, strings.Repeat("c", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.AppendChunk(session.ID, 0, io.MultiReader(strings.NewReader("partial"), failingReader{})); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("failed chunk: %v", err)
+	}
+	resumed, err := files.StartUpload("sample", 10, strings.Repeat("c", 64))
+	if err != nil || resumed.Offset != 0 {
+		t.Fatalf("offset after failure: %+v, %v", resumed, err)
+	}
+	if _, err := files.AppendChunk(session.ID, 0, strings.NewReader("12345678901")); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("oversized chunk: %v", err)
+	}
+	resumed, err = files.StartUpload("sample", 10, strings.Repeat("c", 64))
+	if err != nil || resumed.Offset != 0 {
+		t.Fatalf("offset after oversized chunk: %+v, %v", resumed, err)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
@@ -66,6 +67,54 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		w.WriteHeader(http.StatusCreated)
 	})
+	mux.HandleFunc("POST /api/v1/drive/uploads", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			Path        string `json:"path"`
+			Size        int64  `json:"size"`
+			Fingerprint string `json:"fingerprint"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Expected upload path, size, and fingerprint")
+			return
+		}
+		session, err := files.StartUpload(payload.Path, payload.Size, payload.Fingerprint)
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, session)
+	})
+	mux.HandleFunc("PATCH /api/v1/drive/uploads/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		offset, err := strconv.ParseInt(r.Header.Get("X-Upload-Offset"), 10, 64)
+		if err != nil || offset < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_offset", "Expected a non-negative upload offset")
+			return
+		}
+		newOffset, err := files.AppendChunk(r.PathValue("id"), offset, r.Body)
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int64{"offset": newOffset})
+	})
+	mux.HandleFunc("POST /api/v1/drive/uploads/{id}/complete", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		if err := files.FinishUpload(r.PathValue("id")); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /api/v1/drive/files", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, false) {
 			return
@@ -96,6 +145,10 @@ func driveError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "not_found", "File or folder not found")
 	case errors.Is(err, os.ErrExist):
 		writeError(w, http.StatusConflict, "already_exists", "File or folder already exists")
+	case errors.Is(err, drive.ErrOffset):
+		writeError(w, http.StatusConflict, "offset_mismatch", "Upload offset does not match the stored file")
+	case errors.Is(err, drive.ErrTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "chunk_too_large", "Upload chunk exceeds the allowed size")
 	case errors.Is(err, os.ErrPermission):
 		writeError(w, http.StatusForbidden, "forbidden", "Storage access denied")
 	default:

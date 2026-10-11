@@ -131,6 +131,8 @@ form > input { margin-bottom: 16px; }
 .drive-action-row input[type="file"] { padding: 5px 8px; }
 .drive-action-row button { flex: 0 0 auto; }
 .drive-note { margin-bottom: 16px; color: var(--muted); font-size: 12px; }
+.drive-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+.drive-progress progress { flex: 1; min-width: 0; height: 8px; accent-color: var(--accent); }
 .drive-list { list-style: none; padding: 0; margin: 16px 0 0; border: 1px solid var(--border); border-radius: var(--radius-card); }
 .drive-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .drive-list li:last-child { border-bottom: 0; }

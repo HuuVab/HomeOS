@@ -7,12 +7,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 var ErrInvalidPath = errors.New("invalid drive path")
 
-type Store struct{ root *os.Root }
+type Store struct {
+	root    *os.Root
+	mu      sync.Mutex
+	pending map[string]UploadSession
+}
 
 type Entry struct {
 	Name       string    `json:"name"`
@@ -38,7 +43,12 @@ func New(root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{root: opened}, nil
+	store := &Store{root: opened, pending: make(map[string]UploadSession)}
+	if err := store.loadUploads(); err != nil {
+		opened.Close()
+		return nil, err
+	}
+	return store, nil
 }
 
 func (s *Store) Close() error { return s.root.Close() }
@@ -91,6 +101,8 @@ func (s *Store) resolve(path string, allowRoot bool) (string, error) {
 }
 
 func (s *Store) List(path string) ([]Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	directory, err := s.resolve(path, true)
 	if err != nil {
 		return nil, err
@@ -129,6 +141,9 @@ func (s *Store) List(path string) ([]Entry, error) {
 		entryPath := item.Name()
 		if path != "" {
 			entryPath = path + "/" + item.Name()
+		}
+		if s.isPending(entryPath) {
+			continue
 		}
 		entries = append(entries, Entry{Name: item.Name(), Path: entryPath, Kind: kind, Size: info.Size(), ModifiedAt: info.ModTime().UTC()})
 	}
@@ -184,6 +199,11 @@ func (s *Store) Upload(path string, reader io.Reader) error {
 }
 
 func (s *Store) Open(path string) (*os.File, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.isPending(path) {
+		return nil, os.ErrNotExist
+	}
 	target, err := s.resolve(path, false)
 	if err != nil {
 		return nil, err
