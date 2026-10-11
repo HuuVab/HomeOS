@@ -26,6 +26,17 @@ export default function Drive({ csrfToken }: Props) {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState<number | null>(null)
+  const [query, setQuery] = useState('')
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'size' | 'type'>('name')
+  const [descending, setDescending] = useState(false)
+  const [details, setDetails] = useState<string | null>(null)
+  const visibleEntries = entries.filter((entry) => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => {
+    const comparison = sortBy === 'date' ? a.modifiedAt.localeCompare(b.modifiedAt)
+      : sortBy === 'size' ? a.size - b.size
+      : sortBy === 'type' ? a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)
+      : a.name.localeCompare(b.name)
+    return descending ? -comparison : comparison
+  })
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -114,12 +125,18 @@ export default function Drive({ csrfToken }: Props) {
     </div>
     <p className="drive-note">No fixed per-file cap. Uploads resume after interruption when you select the same file again; unfinished files stay hidden until complete.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="drive-actions">
+      <div><label htmlFor="drive-search">Find in this folder</label><input id="drive-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search filenames" /></div>
+      <div><label htmlFor="drive-sort">Sort by</label><div className="drive-action-row"><select id="drive-sort" value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)}><option value="name">Name</option><option value="date">Modified date</option><option value="size">Size</option><option value="type">Type</option></select><button type="button" className="secondary-button" onClick={() => setDescending(!descending)} aria-label={descending ? 'Sort ascending' : 'Sort descending'}>{descending ? 'Descending' : 'Ascending'}</button></div></div>
+    </div>
     {folder && <button type="button" className="secondary-button" onClick={() => setFolder(folder.split('/').slice(0, -1).join('/'))}>↑ Parent folder</button>}
-    {loading ? <p className="empty">Loading files…</p> : entries.length === 0 ? <p className="empty">This folder is empty.</p> :
-      <ul className="drive-list">{entries.map((entry) => <li key={entry.path}>
+    {loading ? <p className="empty">Loading files…</p> : visibleEntries.length === 0 ? <p className="empty">{query ? 'No matching files or folders.' : 'This folder is empty.'}</p> :
+      <ul className="drive-list">{visibleEntries.map((entry) => <li key={entry.path}>
         <span><span className="entry-kind">{entry.kind === 'folder' ? 'Folder' : 'File'}</span>{entry.name}</span>
+        <button type="button" className="secondary-button" onClick={() => setDetails(details === entry.path ? null : entry.path)}>{details === entry.path ? 'Hide details' : 'Details'}</button>
         {entry.kind === 'folder' ? <button type="button" className="secondary-button" onClick={() => setFolder(entry.path)}>Open</button> :
           <a className="secondary-button download-link" href={`/api/v1/drive/files?path=${encodeURIComponent(entry.path)}`}>Download</a>}
+        {details === entry.path && <div className="drive-note">Path: /{entry.path} · Size: {entry.size.toLocaleString()} bytes · Modified: {new Date(entry.modifiedAt).toLocaleString()}</div>}
       </li>)}</ul>}
   </section>
 }
