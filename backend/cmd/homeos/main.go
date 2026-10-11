@@ -138,6 +138,25 @@ func main() {
 	if err := files.SetLimits(maxFileBytes, quotaBytes); err != nil {
 		log.Fatal("HomeDrive limits require a positive file cap and a quota at least as large")
 	}
+	if db.AuthoritativeMetadata() {
+		ownerIDs, err := db.UserIDs()
+		if err != nil {
+			log.Fatal("list HomeDrive owners: ", err)
+		}
+		for _, ownerID := range ownerIDs {
+			userFiles, err := files.ForUser(ownerID)
+			if err != nil {
+				log.Fatalf("open HomeDrive for user %d: %v", ownerID, err)
+			}
+			entries, err := userFiles.AllEntries()
+			if err == nil {
+				err = db.RecoverUploadSessions(ownerID, userFiles.PendingUploads(), entries)
+			}
+			if err != nil {
+				log.Fatalf("recover upload sessions for user %d: %v", ownerID, err)
+			}
+		}
+	}
 	pendingOwners, err := db.PendingFileMutations()
 	if err != nil {
 		log.Fatal("load HomeDrive recovery markers: ", err)
