@@ -42,6 +42,82 @@ func (s *Store) Copy(from, to string) error {
 	return nil
 }
 
+func (s *Store) Search(query string) ([]Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	query = strings.TrimSpace(query)
+	if query == "" || len(query) > 200 {
+		return nil, ErrInvalidPath
+	}
+	result := make([]Entry, 0)
+	var visit func(string) error
+	visit = func(folder string) error {
+		dir, err := s.root.Open(folder)
+		if err != nil {
+			return err
+		}
+		items, err := dir.ReadDir(-1)
+		dir.Close()
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if item.Type()&os.ModeSymlink != 0 || item.Name() == trashDir || strings.HasPrefix(item.Name(), ".homeos-upload-") {
+				continue
+			}
+			entryPath := item.Name()
+			if folder != "." {
+				entryPath = path.Join(folder, item.Name())
+			}
+			if s.isPending(entryPath) {
+				continue
+			}
+			info, err := item.Info()
+			if err != nil {
+				return err
+			}
+			kind := "file"
+			if info.IsDir() {
+				kind = "folder"
+			} else if !info.Mode().IsRegular() {
+				continue
+			}
+			if strings.Contains(strings.ToLower(item.Name()), strings.ToLower(query)) {
+				result = append(result, Entry{Name: item.Name(), Path: entryPath, Kind: kind, Size: info.Size(), ModifiedAt: info.ModTime().UTC()})
+				if len(result) >= 500 {
+					return nil
+				}
+			}
+			if info.IsDir() {
+				if err := visit(entryPath); err != nil {
+					return err
+				}
+				if len(result) >= 500 {
+					return nil
+				}
+			}
+		}
+		return nil
+	}
+	if err := visit("."); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Store) OpenPreview(name string) (*os.File, string, error) {
+	extension := strings.ToLower(path.Ext(name))
+	contentType := map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf"}[extension]
+	if contentType == "" {
+		return nil, "", ErrInvalidPath
+	}
+	file, err := s.Open(name)
+	if err != nil {
+		return nil, "", err
+	}
+	return file, contentType, nil
+}
+
 func (s *Store) copyTree(source, target string) error {
 	info, err := s.root.Lstat(source)
 	if err != nil {

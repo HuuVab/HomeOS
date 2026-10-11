@@ -28,18 +28,37 @@ export default function Drive({ csrfToken }: Props) {
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState<number | null>(null)
   const [query, setQuery] = useState('')
+  const [searchEntries, setSearchEntries] = useState<Entry[]>([])
+  const [searching, setSearching] = useState(false)
+  const [preview, setPreview] = useState<Entry | null>(null)
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'size' | 'type'>('name')
   const [descending, setDescending] = useState(false)
   const [details, setDetails] = useState<string | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([])
-  const visibleEntries = entries.filter((entry) => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => {
+  const visibleEntries = (query.trim() ? searchEntries : entries).slice().sort((a, b) => {
     const comparison = sortBy === 'date' ? a.modifiedAt.localeCompare(b.modifiedAt)
       : sortBy === 'size' ? a.size - b.size
       : sortBy === 'type' ? a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)
       : a.name.localeCompare(b.name)
     return descending ? -comparison : comparison
   })
+
+  useEffect(() => {
+    if (!query.trim()) { setSearchEntries([]); setSearching(false); return }
+    const controller = new AbortController()
+    setSearching(true)
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/v1/drive/search?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal, cache: 'no-store' })
+        if (!response.ok) throw new Error('Search failed')
+        const data: { entries: Entry[] } = await response.json()
+        setSearchEntries(data.entries)
+      } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Search failed') }
+      finally { if (!controller.signal.aborted) setSearching(false) }
+    }, 250)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [query])
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -168,7 +187,7 @@ export default function Drive({ csrfToken }: Props) {
 
   return <section className="drive" aria-label="HomeDrive">
     <div className="section-heading"><div><p className="eyebrow">Your storage</p><h2>Files and folders</h2></div></div>
-    <p className="drive-path">Location: /{folder}</p>
+    <nav className="drive-path" aria-label="Folder path"><button type="button" className="secondary-button" onClick={() => setFolder('')}>Root</button>{folder.split('/').filter(Boolean).map((part, index, parts) => <span key={index}> / <button type="button" className="secondary-button" onClick={() => setFolder(parts.slice(0, index + 1).join('/'))}>{part}</button></span>)}</nav>
     <div className="drive-actions">
       <form onSubmit={(event) => void createFolder(event)}>
         <label htmlFor="folder-name">New folder</label>
@@ -182,11 +201,11 @@ export default function Drive({ csrfToken }: Props) {
     <button type="button" className="secondary-button" onClick={() => setShowTrash(!showTrash)}>{showTrash ? 'Show files' : 'Trash'}</button>
     {showTrash ? <><p className="drive-note">Items are automatically deleted after 30 days unless the server retention setting is changed.</p><ul className="drive-list">{trashEntries.map((entry) => <li key={entry.id}><span>/{entry.path}</span><button type="button" disabled={busy} onClick={() => void restoreEntry(entry)}>Restore</button><button type="button" disabled={busy} onClick={() => void deleteForever(entry)}>Delete forever</button></li>)}{trashEntries.length === 0 && <li>Trash is empty.</li>}</ul></> : <>
     <div className="drive-actions">
-      <div><label htmlFor="drive-search">Find in this folder</label><input id="drive-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search filenames" /></div>
+      <div><label htmlFor="drive-search">Search all folders</label><input id="drive-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search filenames" /></div>
       <div><label htmlFor="drive-sort">Sort by</label><div className="drive-action-row"><select id="drive-sort" value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)}><option value="name">Name</option><option value="date">Modified date</option><option value="size">Size</option><option value="type">Type</option></select><button type="button" className="secondary-button" onClick={() => setDescending(!descending)} aria-label={descending ? 'Sort ascending' : 'Sort descending'}>{descending ? 'Descending' : 'Ascending'}</button></div></div>
     </div>
     {folder && <button type="button" className="secondary-button" onClick={() => setFolder(folder.split('/').slice(0, -1).join('/'))}>↑ Parent folder</button>}
-    {loading ? <p className="empty">Loading files…</p> : visibleEntries.length === 0 ? <p className="empty">{query ? 'No matching files or folders.' : 'This folder is empty.'}</p> :
+    {loading || searching ? <p className="empty">{searching ? 'Searching…' : 'Loading files…'}</p> : visibleEntries.length === 0 ? <p className="empty">{query ? 'No matching files or folders.' : 'This folder is empty.'}</p> :
       <ul className="drive-list">{visibleEntries.map((entry) => <li key={entry.path}>
         <span><span className="entry-kind">{entry.kind === 'folder' ? 'Folder' : 'File'}</span>{entry.name}</span>
         <button type="button" className="secondary-button" onClick={() => setDetails(details === entry.path ? null : entry.path)}>{details === entry.path ? 'Hide details' : 'Details'}</button>
@@ -196,8 +215,10 @@ export default function Drive({ csrfToken }: Props) {
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeEntry(entry, 'trash')}>Delete</button>
         {entry.kind === 'folder' ? <><button type="button" className="secondary-button" onClick={() => setFolder(entry.path)}>Open</button><a className="secondary-button download-link" href={`/api/v1/drive/folders/zip?path=${encodeURIComponent(entry.path)}`}>ZIP</a></> :
           <a className="secondary-button download-link" href={`/api/v1/drive/files?path=${encodeURIComponent(entry.path)}`}>Download</a>}
+        {entry.kind === 'file' && /\.(png|jpe?g|gif|webp|pdf)$/i.test(entry.name) && <button type="button" className="secondary-button" onClick={() => setPreview(entry)}>Preview</button>}
         {details === entry.path && <div className="drive-note">Path: /{entry.path} · Size: {entry.size.toLocaleString()} bytes · Modified: {new Date(entry.modifiedAt).toLocaleString()}</div>}
       </li>)}</ul>}
+    {preview && <div className="drive-preview"><button type="button" onClick={() => setPreview(null)}>Close preview</button>{/\.pdf$/i.test(preview.name) ? <iframe title={`Preview ${preview.name}`} src={`/api/v1/drive/preview?path=${encodeURIComponent(preview.path)}`} /> : <img alt={`Preview ${preview.name}`} src={`/api/v1/drive/preview?path=${encodeURIComponent(preview.path)}`} />}</div>}
     </>}
   </section>
 }

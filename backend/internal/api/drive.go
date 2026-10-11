@@ -38,6 +38,38 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 	})
+	mux.HandleFunc("GET /api/v1/drive/search", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, false) {
+			return
+		}
+		entries, err := files.Search(r.URL.Query().Get("q"))
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+	})
+	mux.HandleFunc("GET /api/v1/drive/preview", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, false) {
+			return
+		}
+		name := r.URL.Query().Get("path")
+		file, contentType, err := files.OpenPreview(name)
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": path.Base(name)}))
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+		http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+	})
 	mux.HandleFunc("POST /api/v1/drive/move", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, true) {
 			return

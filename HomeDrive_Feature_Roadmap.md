@@ -25,7 +25,7 @@
 - [x] **P0** Download files
 - [x] **P0** Download folders as ZIP
 - [ ] **P0** File list and grid views
-- [ ] **P0** Sort by name, date, size, and type
+- [x] **P0** Sort by name, date, size, and type
 - [x] **P0** File details and metadata
 - [ ] **P1** Bulk selection and operations
 - [ ] **P1** Cut, copy, and paste
@@ -33,7 +33,7 @@
 - [ ] **P1** Recent files
 - [ ] **P1** File type filters
 - [ ] **P1** Keyboard shortcuts
-- [ ] **P1** Breadcrumb navigation
+- [x] **P1** Breadcrumb navigation
 - [ ] **P1** File version history and restore
 - [x] **P1** Recycle bin, restore, and permanent deletion
 - [x] **P1** Automatically delete Trash items after a configurable retention period (default 30 days)
@@ -64,8 +64,8 @@
 
 ## 3. File previews and media
 
-- [ ] **P0** Image previews
-- [ ] **P0** PDF previews
+- [x] **P0** Image previews
+- [x] **P0** PDF previews
 - [ ] **P1** Video streaming with seeking
 - [ ] **P1** Audio playback
 - [ ] **P1** Plain-text, Markdown, and code previews
@@ -82,7 +82,7 @@
 
 ## 4. Search and organization
 
-- [ ] **P0** Search by filename
+- [x] **P0** Search by filename
 - [ ] **P1** Search by folder, file type, date, and size
 - [ ] **P1** Search in trash and shared files
 - [ ] **P1** Recent search history
