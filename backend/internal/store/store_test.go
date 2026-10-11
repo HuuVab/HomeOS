@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/auth"
+	"github.com/HuuVab/HomeOS/backend/internal/drive"
 )
 
 func TestMigrationFailureIsExplicit(t *testing.T) {
@@ -163,6 +164,13 @@ func TestFileMutationMarkerSurvivesRestart(t *testing.T) {
 	owners, err := db.PendingFileMutations()
 	if err != nil || len(owners) != 1 || owners[0] != 1 {
 		t.Fatalf("pending owners = %v, %v", owners, err)
+	}
+	if err := db.ReconcileFileMutation(1, []drive.Entry{{Name: "bad", Path: "bad", Kind: "invalid"}}); err == nil {
+		t.Fatal("expected invalid metadata to fail reconciliation")
+	}
+	owners, err = db.PendingFileMutations()
+	if err != nil || len(owners) != 1 || owners[0] != 1 {
+		t.Fatalf("failed reconciliation lost marker: %v, %v", owners, err)
 	}
 	if err := db.ReconcileFileMutation(1, nil); err != nil {
 		t.Fatal(err)
