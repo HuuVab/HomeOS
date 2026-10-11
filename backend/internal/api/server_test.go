@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,29 @@ import (
 	"github.com/HuuVab/HomeOS/backend/internal/monitor"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
+
+func TestHandlerServesWebWithDriveRoutes(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "homeos.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	files, err := drive.New(filepath.Join(t.TempDir(), "files"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	web := t.TempDir()
+	if err := os.WriteFile(filepath.Join(web, "index.html"), []byte("home"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(web, db, testCollector{}, files)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, httptest.NewRequest("GET", "/", nil))
+	if res.Code != 200 || res.Body.String() != "home" {
+		t.Fatalf("web: %d %s", res.Code, res.Body.String())
+	}
+}
 
 func testHandler(t *testing.T) (http.Handler, *store.Store) {
 	t.Helper()

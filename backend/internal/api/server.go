@@ -89,7 +89,7 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 	if webDir != "" {
 		if index, err := os.ReadFile(filepath.Join(webDir, "index.html")); err == nil {
 			files := http.FileServer(http.Dir(webDir))
-			mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/" {
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.Header().Set("Cache-Control", "no-store")
