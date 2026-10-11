@@ -49,7 +49,7 @@
 
 - [x] **P0** Per-file upload progress
 - [x] **P0** Upload error handling
-- [ ] **P0** File size limits and filename validation
+- [x] **P0** File size limits and filename validation
 - [x] **P1** Chunked and resumable uploads
 - [ ] **P1** Pause and resume uploads
 - [ ] **P1** Parallel uploads and upload queue
@@ -163,8 +163,8 @@
 - [x] **P0** Path traversal protection
 - [ ] **P0** Secure internal file paths
 - [x] **P0** Database transactions for metadata
-- [ ] **P0** Atomic upload commit
-- [ ] **P0** File size and quota enforcement
+- [x] **P0** Atomic upload commit
+- [x] **P0** File size and quota enforcement
 - [ ] **P0** Rate limiting
 - [ ] **P0** Safe file download headers
 - [x] **P0** CSRF protection where applicable

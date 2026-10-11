@@ -22,9 +22,22 @@ type UploadSession struct {
 	Size        int64  `json:"size"`
 	Fingerprint string `json:"fingerprint"`
 	Offset      int64  `json:"offset"`
+	Staged      bool   `json:"staged"`
 }
 
-func marker(id string) string { return ".homeos-upload-" + id + ".json" }
+func marker(id string) string    { return ".homeos-upload-" + id + ".json" }
+func stagePath(id string) string { return ".homeos-staging/" + id }
+
+func (s *Store) ensureStage() error {
+	if err := s.root.Mkdir(".homeos-staging", 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	info, err := s.root.Lstat(".homeos-staging")
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return ErrInvalidPath
+	}
+	return nil
+}
 
 func (s *Store) loadUploads() error {
 	root, err := s.root.Open(".")
@@ -56,6 +69,26 @@ func (s *Store) loadUploads() error {
 		}
 		if _, err := s.resolve(session.Path, false); err != nil {
 			return err
+		}
+		if session.Staged {
+			if _, err := s.root.Lstat(stagePath(session.ID)); errors.Is(err, os.ErrNotExist) {
+				info, targetErr := s.root.Lstat(session.Path)
+				if targetErr == nil && info.Mode().IsRegular() && info.Size() == session.Size {
+					if err := s.root.Remove(name); err != nil {
+						return err
+					}
+					continue
+				}
+				if errors.Is(targetErr, os.ErrNotExist) {
+					if err := s.root.Remove(name); err != nil {
+						return err
+					}
+					continue
+				}
+				return err
+			} else if err != nil {
+				return err
+			}
 		}
 		s.pending[session.ID] = session
 	}
@@ -97,6 +130,9 @@ func (s *Store) StartUpload(path string, size int64, fingerprint string) (Upload
 	if size < 0 || !validFingerprint(fingerprint) {
 		return UploadSession{}, ErrInvalidPath
 	}
+	if size > s.maxFileBytes {
+		return UploadSession{}, ErrTooLarge
+	}
 	for _, pending := range s.pending {
 		if !strings.EqualFold(pending.Path, path) {
 			continue
@@ -104,7 +140,11 @@ func (s *Store) StartUpload(path string, size int64, fingerprint string) (Upload
 		if pending.Size != size || pending.Fingerprint != fingerprint {
 			return UploadSession{}, os.ErrExist
 		}
-		file, err := s.root.OpenFile(target, os.O_CREATE|os.O_RDWR, 0600)
+		name := target
+		if pending.Staged {
+			name = stagePath(pending.ID)
+		}
+		file, err := s.root.OpenFile(name, os.O_RDWR, 0600)
 		if err != nil {
 			return UploadSession{}, err
 		}
@@ -124,11 +164,17 @@ func (s *Store) StartUpload(path string, size int64, fingerprint string) (Upload
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return UploadSession{}, err
 	}
+	if err := s.checkAllocationLocked(size); err != nil {
+		return UploadSession{}, err
+	}
+	if err := s.ensureStage(); err != nil {
+		return UploadSession{}, err
+	}
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return UploadSession{}, err
 	}
-	session := UploadSession{ID: hex.EncodeToString(random[:]), Path: path, Size: size, Fingerprint: fingerprint}
+	session := UploadSession{ID: hex.EncodeToString(random[:]), Path: path, Size: size, Fingerprint: fingerprint, Staged: true}
 	meta, err := s.root.OpenFile(marker(session.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return UploadSession{}, err
@@ -148,7 +194,7 @@ func (s *Store) StartUpload(path string, size int64, fingerprint string) (Upload
 		s.root.Remove(marker(session.ID))
 		return UploadSession{}, err
 	}
-	file, err := s.root.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := s.root.OpenFile(stagePath(session.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		s.root.Remove(marker(session.ID))
 		return UploadSession{}, err
@@ -168,7 +214,11 @@ func (s *Store) AppendChunk(id string, offset int64, reader io.Reader) (int64, e
 	if _, err := s.resolve(session.Path, false); err != nil {
 		return 0, err
 	}
-	file, err := s.root.OpenFile(session.Path, os.O_RDWR, 0600)
+	name := session.Path
+	if session.Staged {
+		name = stagePath(id)
+	}
+	file, err := s.root.OpenFile(name, os.O_RDWR, 0600)
 	if err != nil {
 		return 0, err
 	}
@@ -217,7 +267,11 @@ func (s *Store) FinishUpload(id string) error {
 	if _, err := s.resolve(session.Path, false); err != nil {
 		return err
 	}
-	file, err := s.root.Open(session.Path)
+	name := session.Path
+	if session.Staged {
+		name = stagePath(id)
+	}
+	file, err := s.root.Open(name)
 	if err != nil {
 		return err
 	}
@@ -228,6 +282,16 @@ func (s *Store) FinishUpload(id string) error {
 	}
 	if !info.Mode().IsRegular() || info.Size() != session.Size {
 		return ErrOffset
+	}
+	if session.Staged {
+		if _, err := s.root.Lstat(session.Path); err == nil {
+			return os.ErrExist
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := s.root.Rename(name, session.Path); err != nil {
+			return err
+		}
 	}
 	if err := s.root.Remove(marker(id)); err != nil {
 		return err

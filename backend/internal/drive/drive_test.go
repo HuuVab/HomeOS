@@ -262,3 +262,63 @@ func TestTrashRetentionAndPermanentDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStagedUploadAndQuota(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "files")
+	files, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := files.SetLimits(10, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Upload("oversized.txt", strings.NewReader("12345678901")); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("direct limit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "oversized.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("oversized file visible: %v", err)
+	}
+	if _, err := files.StartUpload("too-big.txt", 11, strings.Repeat("a", 64)); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("file limit: %v", err)
+	}
+	session, err := files.StartUpload("one.txt", 10, strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.StartUpload("two.txt", 10, strings.Repeat("b", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.StartUpload("three.txt", 1, strings.Repeat("c", 64)); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("reserved quota: %v", err)
+	}
+	if _, err := files.AppendChunk(session.ID, 0, strings.NewReader("1234567890")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "one.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unfinished file visible on disk: %v", err)
+	}
+	if err := files.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err = New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	if err := files.SetLimits(10, 20); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := files.StartUpload("one.txt", 10, strings.Repeat("a", 64))
+	if err != nil || resumed.Offset != 10 {
+		t.Fatalf("resume: %+v %v", resumed, err)
+	}
+	if err := files.FinishUpload(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "one.txt")); err != nil {
+		t.Fatalf("committed file missing: %v", err)
+	}
+	if err := files.Copy("one.txt", "copy.txt"); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("copy quota: %v", err)
+	}
+}

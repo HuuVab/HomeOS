@@ -35,6 +35,13 @@ func (s *Store) Copy(from, to string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	copyBytes, err := s.treeBytes(source, false)
+	if err != nil {
+		return err
+	}
+	if err := s.checkAllocationLocked(copyBytes); err != nil {
+		return err
+	}
 	if err := s.copyTree(source, target); err != nil {
 		_ = s.removeTree(target)
 		return err
@@ -62,7 +69,7 @@ func (s *Store) Search(query string) ([]Entry, error) {
 			return err
 		}
 		for _, item := range items {
-			if item.Type()&os.ModeSymlink != 0 || item.Name() == trashDir || item.Name() == ".homeos-users" || strings.HasPrefix(item.Name(), ".homeos-upload-") {
+			if item.Type()&os.ModeSymlink != 0 || item.Name() == trashDir || item.Name() == ".homeos-users" || item.Name() == ".homeos-staging" || strings.HasPrefix(item.Name(), ".homeos-upload-") {
 				continue
 			}
 			entryPath := item.Name()

@@ -96,6 +96,23 @@ func main() {
 		log.Fatal("initialize HomeDrive: ", err)
 	}
 	defer files.Close()
+	maxFileBytes := int64(2 << 30)
+	quotaBytes := int64(20 << 30)
+	if configured := os.Getenv("HOMEOS_MAX_FILE_BYTES"); configured != "" {
+		maxFileBytes, err = strconv.ParseInt(configured, 10, 64)
+		if err != nil {
+			log.Fatal("HOMEOS_MAX_FILE_BYTES must be a positive integer")
+		}
+	}
+	if configured := os.Getenv("HOMEOS_USER_QUOTA_BYTES"); configured != "" {
+		quotaBytes, err = strconv.ParseInt(configured, 10, 64)
+		if err != nil {
+			log.Fatal("HOMEOS_USER_QUOTA_BYTES must be a positive integer")
+		}
+	}
+	if err := files.SetLimits(maxFileBytes, quotaBytes); err != nil {
+		log.Fatal("HomeDrive limits require a positive file cap and a quota at least as large")
+	}
 	if entries, err := files.AllEntries(); err != nil {
 		log.Fatal("scan HomeDrive: ", err)
 	} else if err := db.ReplaceFileEntries(1, entries); err != nil {

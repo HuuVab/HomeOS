@@ -38,6 +38,17 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 	})
+	mux.HandleFunc("GET /api/v1/drive/storage", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, false) {
+			return
+		}
+		usage, err := files.Usage()
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, usage)
+	})
 	mux.HandleFunc("GET /api/v1/drive/search", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, false) {
 			return
@@ -286,6 +297,8 @@ func driveError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "offset_mismatch", "Upload offset does not match the stored file")
 	case errors.Is(err, drive.ErrTooLarge):
 		writeError(w, http.StatusRequestEntityTooLarge, "chunk_too_large", "Upload chunk exceeds the allowed size")
+	case errors.Is(err, drive.ErrQuotaExceeded):
+		writeError(w, http.StatusInsufficientStorage, "quota_exceeded", "Storage quota exceeded")
 	case errors.Is(err, os.ErrPermission):
 		writeError(w, http.StatusForbidden, "forbidden", "Storage access denied")
 	default:

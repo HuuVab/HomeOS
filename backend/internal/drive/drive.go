@@ -26,11 +26,13 @@ type TrashEntry struct {
 }
 
 type Store struct {
-	root     *os.Root
-	rootPath string
-	mu       sync.Mutex
-	pending  map[string]UploadSession
-	users    map[int64]*Store
+	root         *os.Root
+	rootPath     string
+	mu           sync.Mutex
+	pending      map[string]UploadSession
+	users        map[int64]*Store
+	maxFileBytes int64
+	quotaBytes   int64
 }
 
 type Entry struct {
@@ -57,7 +59,7 @@ func New(root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := &Store{root: opened, rootPath: absolute, pending: make(map[string]UploadSession), users: make(map[int64]*Store)}
+	store := &Store{root: opened, rootPath: absolute, pending: make(map[string]UploadSession), users: make(map[int64]*Store), maxFileBytes: 2 << 30, quotaBytes: 20 << 30}
 	if err := store.loadUploads(); err != nil {
 		opened.Close()
 		return nil, err
@@ -98,11 +100,13 @@ func (s *Store) ForUser(id int64) (*Store, error) {
 		return nil, err
 	}
 	s.users[id] = child
+	child.maxFileBytes = s.maxFileBytes
+	child.quotaBytes = s.quotaBytes
 	return child, nil
 }
 
 func validPart(part string) bool {
-	if part == "" || part == "." || part == ".." || part == trashDir || part == ".homeos-users" || strings.HasPrefix(part, ".homeos-upload-") ||
+	if part == "" || part == "." || part == ".." || part == trashDir || part == ".homeos-users" || part == ".homeos-staging" || strings.HasPrefix(part, ".homeos-upload-") ||
 		strings.ContainsAny(part, `\/:*?"<>|`) || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
 		return false
 	}
@@ -173,7 +177,7 @@ func (s *Store) List(path string) ([]Entry, error) {
 	}
 	entries := make([]Entry, 0, len(items))
 	for _, item := range items {
-		if item.Name() == trashDir || item.Name() == ".homeos-users" || strings.HasPrefix(item.Name(), ".homeos-upload-") || item.Type()&os.ModeSymlink != 0 {
+		if item.Name() == trashDir || item.Name() == ".homeos-users" || item.Name() == ".homeos-staging" || strings.HasPrefix(item.Name(), ".homeos-upload-") || item.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		info, err := item.Info()
@@ -446,6 +450,8 @@ func (s *Store) CreateFolder(path string) error {
 }
 
 func (s *Store) Upload(path string, reader io.Reader) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	target, err := s.resolve(path, false)
 	if err != nil {
 		return err
@@ -455,24 +461,59 @@ func (s *Store) Upload(path string, reader io.Reader) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	file, err := s.root.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	usage, err := s.usageLocked()
+	if err != nil {
+		return err
+	}
+	available := usage.QuotaBytes - usage.UsedBytes - usage.ReservedBytes
+	if available < 0 {
+		return ErrQuotaExceeded
+	}
+	limit := s.maxFileBytes
+	if available < limit {
+		limit = available
+	}
+	if err := s.ensureStage(); err != nil {
+		return err
+	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return err
+	}
+	staging := stagePath(hex.EncodeToString(random[:]))
+	file, err := s.root.OpenFile(staging, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
 	complete := false
 	defer func() {
 		if !complete {
-			s.root.Remove(target)
+			s.root.Remove(staging)
 		}
 	}()
 	defer file.Close()
-	if _, err := io.Copy(file, reader); err != nil {
+	written, err := io.Copy(file, io.LimitReader(reader, limit+1))
+	if err != nil {
 		return err
+	}
+	if written > limit {
+		if available < s.maxFileBytes {
+			return ErrQuotaExceeded
+		}
+		return ErrTooLarge
 	}
 	if err := file.Sync(); err != nil {
 		return err
 	}
 	if err := file.Close(); err != nil {
+		return err
+	}
+	if _, err := s.root.Lstat(target); err == nil {
+		return os.ErrExist
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := s.root.Rename(staging, target); err != nil {
 		return err
 	}
 	complete = true
