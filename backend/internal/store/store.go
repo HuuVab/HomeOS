@@ -287,6 +287,15 @@ func (s *Store) PendingFileMutations() ([]int64, error) {
 	return owners, rows.Err()
 }
 
+func (s *Store) HasPendingFileMutation(ownerID int64) (bool, error) {
+	var found int
+	err := s.db.QueryRow(s.query(`SELECT 1 FROM metadata_reconcile WHERE owner_id = ?`), ownerID).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (s *Store) ResetAdminPassword(username, passwordHash string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
