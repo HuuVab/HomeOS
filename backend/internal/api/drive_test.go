@@ -12,7 +12,7 @@ import (
 )
 
 func TestHomeDriveAccessAndRoundTrip(t *testing.T) {
-	handler, _ := testHandler(t)
+	handler, db := testHandler(t)
 	call := func(method, path, body, csrf string, cookie *http.Cookie) *httptest.ResponseRecorder {
 		t.Helper()
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -73,6 +73,10 @@ func TestHomeDriveAccessAndRoundTrip(t *testing.T) {
 	}
 	if got := call("PUT", "/api/v1/drive/files?path=..%2Fescape.txt", "bad", session.CSRFToken, cookie).Code; got != 400 {
 		t.Fatalf("traversal = %d", got)
+	}
+	owners, err := db.PendingFileMutations()
+	if err != nil || len(owners) != 0 {
+		t.Fatalf("failed validation left a recovery marker: %v, %v", owners, err)
 	}
 	listing := call("GET", "/api/v1/drive?path=docs", "", "", cookie)
 	if listing.Code != 200 || !strings.Contains(listing.Body.String(), `"name":"note.txt"`) {

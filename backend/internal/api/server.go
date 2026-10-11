@@ -60,17 +60,29 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 		}
 		buffered := httptest.NewRecorder()
 		driveMux.ServeHTTP(buffered, r)
-		entries, err := userFiles.AllEntries()
-		if err == nil {
-			err = db.ReconcileFileMutation(user.ID, entries)
-		}
-		if err != nil {
-			log.Printf("HomeDrive metadata reconciliation for user %d: %v", user.ID, err)
-			writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata update is pending recovery")
-			return
-		}
 		response := buffered.Result()
 		defer response.Body.Close()
+		if response.StatusCode >= http.StatusInternalServerError {
+			writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive operation needs recovery")
+			return
+		}
+		if response.StatusCode >= http.StatusMultipleChoices {
+			if err := db.CancelFileMutation(user.ID); err != nil {
+				log.Printf("HomeDrive mutation marker cancellation for user %d: %v", user.ID, err)
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata update is pending recovery")
+				return
+			}
+		} else {
+			entries, err := userFiles.AllEntries()
+			if err == nil {
+				err = db.ReconcileFileMutation(user.ID, entries)
+			}
+			if err != nil {
+				log.Printf("HomeDrive metadata reconciliation for user %d: %v", user.ID, err)
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata update is pending recovery")
+				return
+			}
+		}
 		for key, values := range response.Header {
 			for _, value := range values {
 				w.Header().Add(key, value)
