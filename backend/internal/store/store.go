@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
@@ -24,10 +25,14 @@ var ErrAdminExists = errors.New("an administrator already exists")
 var ErrAdminNotFound = errors.New("administrator not found")
 
 type Store struct {
-	db      *sql.DB
-	path    string
-	dialect string
+	db         *sql.DB
+	path       string
+	dialect    string
+	mutationMu sync.Mutex
 }
+
+func (s *Store) LockDriveMutations()   { s.mutationMu.Lock() }
+func (s *Store) UnlockDriveMutations() { s.mutationMu.Unlock() }
 
 type User struct {
 	ID           int64  `json:"id"`
