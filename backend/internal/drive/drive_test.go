@@ -110,6 +110,9 @@ func TestResumableUploadSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer files.Close()
+	if pending := files.PendingUploads(); len(pending) != 1 || pending[0].Offset != 6 {
+		t.Fatalf("restored pending offset: %+v", pending)
+	}
 	resumed, err := files.StartUpload("large.txt", 11, fingerprint)
 	if err != nil || resumed.ID != session.ID || resumed.Offset != 6 {
 		t.Fatalf("resume: %+v, %v", resumed, err)

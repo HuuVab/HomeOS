@@ -90,6 +90,15 @@ func (s *Store) loadUploads() error {
 				return err
 			}
 		}
+		stored := session.Path
+		if session.Staged {
+			stored = stagePath(session.ID)
+		}
+		info, err := s.root.Stat(stored)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > session.Size {
+			return ErrInvalidPath
+		}
+		session.Offset = info.Size()
 		s.pending[session.ID] = session
 	}
 	return nil
