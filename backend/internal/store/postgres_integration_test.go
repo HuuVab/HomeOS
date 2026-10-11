@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -111,5 +112,100 @@ func TestPostgresMetadataIntegration(t *testing.T) {
 	}
 	if _, err := db.PendingUploadSession(1, upload.ID); err != nil {
 		t.Fatalf("upload after restart: %v", err)
+	}
+}
+
+func TestPostgresSQLiteMigrationIntegration(t *testing.T) {
+	connectionURL := os.Getenv("HOMEOS_TEST_POSTGRES_URL")
+	if connectionURL == "" {
+		t.Skip("HOMEOS_TEST_POSTGRES_URL is not configured")
+	}
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		t.Fatal(err)
+	}
+	schema := "homedrive_migrate_" + hex.EncodeToString(random[:])
+	admin, err := sql.Open("pgx", connectionURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	if _, err := admin.Exec(`CREATE SCHEMA "` + schema + `"`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := admin.Exec(`DROP SCHEMA "` + schema + `" CASCADE`); err != nil {
+			t.Errorf("remove isolated test schema: %v", err)
+		}
+	}()
+	parsed, err := url.Parse(connectionURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameters := parsed.Query()
+	parameters.Set("options", "-csearch_path="+schema)
+	parsed.RawQuery = parameters.Encode()
+	target, err := OpenPostgres(parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	source, err := Open(filepath.Join(t.TempDir(), "source.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if err := source.CreateAdmin("migrated_admin", "preserved-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.CreateUser("migrated_user", "second-hash"); err != nil {
+		t.Fatal(err)
+	}
+	files, err := drive.New(filepath.Join(t.TempDir(), "files"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	if err := files.Upload("note.txt", strings.NewReader("hello")); err != nil {
+		t.Fatal(err)
+	}
+	first, err := files.AllEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.ReplaceFileEntries(1, first); err != nil {
+		t.Fatal(err)
+	}
+	secondFiles, err := files.ForUser(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secondFiles.CreateFolder("docs"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := secondFiles.AllEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.ReplaceFileEntries(2, second); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateSQLiteToPostgres(source, target, files); err != nil {
+		t.Fatal(err)
+	}
+	user, err := target.UserByUsername("migrated_admin")
+	if err != nil || user.ID != 1 || user.PasswordHash != "preserved-hash" {
+		t.Fatalf("migrated admin = %+v, %v", user, err)
+	}
+	entries, err := target.FileEntries(1, "")
+	if err != nil || len(entries) != 1 || entries[0].Path != "note.txt" || entries[0].Version != 1 {
+		t.Fatalf("owner 1 files = %+v, %v", entries, err)
+	}
+	entries, err = target.FileEntries(2, "")
+	if err != nil || len(entries) != 1 || entries[0].Path != "docs" {
+		t.Fatalf("owner 2 files = %+v, %v", entries, err)
+	}
+	if err := MigrateSQLiteToPostgres(source, target, files); err == nil {
+		t.Fatal("second migration unexpectedly accepted a populated target")
 	}
 }
