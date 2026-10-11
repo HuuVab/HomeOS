@@ -48,9 +48,9 @@ func main() {
 		return
 	}
 
-	if len(os.Args) > 1 && (os.Args[1] == "create-admin" || os.Args[1] == "reset-admin-password") {
+	if len(os.Args) > 1 && (os.Args[1] == "create-admin" || os.Args[1] == "create-user" || os.Args[1] == "reset-admin-password") {
 		if len(os.Args) != 3 || !validUsername.MatchString(os.Args[2]) {
-			log.Fatal("usage: homeos <create-admin|reset-admin-password> <3-32 character username (letters, digits, underscore)>")
+			log.Fatal("usage: homeos <create-admin|create-user|reset-admin-password> <3-32 character username (letters, digits, underscore)>")
 		}
 		fmt.Fprint(os.Stderr, "Admin password: ")
 		password, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -67,6 +67,8 @@ func main() {
 		}
 		if os.Args[1] == "reset-admin-password" {
 			err = db.ResetAdminPassword(os.Args[2], hash)
+		} else if os.Args[1] == "create-user" {
+			err = db.CreateUser(os.Args[2], hash)
 		} else {
 			err = db.CreateAdmin(os.Args[2], hash)
 		}
@@ -77,7 +79,7 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 {
-		log.Fatal("usage: homeos [create-admin <username> | reset-admin-password <username> | backup <new-backup-path>]")
+		log.Fatal("usage: homeos [create-admin <username> | create-user <username> | reset-admin-password <username> | backup <new-backup-path>]")
 	}
 
 	bindAddress := os.Getenv("HOMEOS_BIND_ADDR")
@@ -94,6 +96,11 @@ func main() {
 		log.Fatal("initialize HomeDrive: ", err)
 	}
 	defer files.Close()
+	if entries, err := files.AllEntries(); err != nil {
+		log.Fatal("scan HomeDrive: ", err)
+	} else if err := db.ReplaceFileEntries(1, entries); err != nil {
+		log.Fatal("index HomeDrive: ", err)
+	}
 	retentionDays := 30
 	if configured := os.Getenv("HOMEOS_TRASH_RETENTION_DAYS"); configured != "" {
 		retentionDays, err = strconv.Atoi(configured)

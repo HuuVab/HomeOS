@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HuuVab/HomeOS/backend/internal/drive"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -157,6 +159,29 @@ func (s *Store) CreateAdmin(username, passwordHash string) error {
 		return ErrAdminExists
 	}
 	return nil
+}
+
+func (s *Store) CreateUser(username, passwordHash string) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`INSERT INTO users (username, display_name, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, 'user', ?, ?)`, username, username, passwordHash, now, now)
+	return err
+}
+
+func (s *Store) ReplaceFileEntries(ownerID int64, entries []drive.Entry) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM file_entries WHERE owner_id = ?`, ownerID); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if _, err := tx.Exec(`INSERT INTO file_entries (owner_id, path, kind, size, modified_at) VALUES (?, ?, ?, ?, ?)`, ownerID, entry.Path, entry.Kind, entry.Size, entry.ModifiedAt.Unix()); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ResetAdminPassword(username, passwordHash string) error {

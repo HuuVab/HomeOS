@@ -62,7 +62,7 @@ func (s *Store) Search(query string) ([]Entry, error) {
 			return err
 		}
 		for _, item := range items {
-			if item.Type()&os.ModeSymlink != 0 || item.Name() == trashDir || strings.HasPrefix(item.Name(), ".homeos-upload-") {
+			if item.Type()&os.ModeSymlink != 0 || item.Name() == trashDir || item.Name() == ".homeos-users" || strings.HasPrefix(item.Name(), ".homeos-upload-") {
 				continue
 			}
 			entryPath := item.Name()
@@ -100,6 +100,30 @@ func (s *Store) Search(query string) ([]Entry, error) {
 		return nil
 	}
 	if err := visit("."); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Store) AllEntries() ([]Entry, error) {
+	result := make([]Entry, 0)
+	var visit func(string) error
+	visit = func(folder string) error {
+		entries, err := s.List(folder)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			result = append(result, entry)
+			if entry.Kind == "folder" {
+				if err := visit(entry.Path); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := visit(""); err != nil {
 		return nil, err
 	}
 	return result, nil

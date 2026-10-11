@@ -181,7 +181,7 @@ export default function App() {
 	    <h1>HomeOS</h1>
 	    <section className="login-card">
 	      <h2>Sign in</h2>
-	      <p className="login-intro">Use your HomeOS administrator account.</p>
+	      <p className="login-intro">Use your HomeOS account.</p>
 	      <form onSubmit={(event) => void signIn(event)}>
 	        <label htmlFor="username">Username</label>
 	        <input id="username" name="username" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} />

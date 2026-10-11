@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/HuuVab/HomeOS/backend/internal/auth"
 )
 
 func TestHomeDriveAccessAndRoundTrip(t *testing.T) {
@@ -62,5 +64,57 @@ func TestHomeDriveAccessAndRoundTrip(t *testing.T) {
 	download := call("GET", "/api/v1/drive/files?path=docs%2Fnote.txt", "", "", cookie)
 	if download.Code != 200 || download.Body.String() != "hello" {
 		t.Fatalf("download = %d: %q", download.Code, download.Body.String())
+	}
+}
+
+func TestHomeDriveUserIsolation(t *testing.T) {
+	handler, db := testHandler(t)
+	hash, err := auth.HashPassword("user-test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateUser("second_user", hash); err != nil {
+		t.Fatal(err)
+	}
+	login := func(username, password string) (*http.Cookie, string) {
+		req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != 200 {
+			t.Fatalf("login %s: %d %s", username, res.Code, res.Body.String())
+		}
+		var session struct {
+			CSRFToken string `json:"csrfToken"`
+		}
+		if err := json.Unmarshal(res.Body.Bytes(), &session); err != nil {
+			t.Fatal(err)
+		}
+		return res.Result().Cookies()[0], session.CSRFToken
+	}
+	adminCookie, adminCSRF := login("test_admin", "a-long-test-password")
+	userCookie, userCSRF := login("second_user", "user-test-password")
+	call := func(method, path, body, csrf string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.AddCookie(cookie)
+		req.Header.Set("X-CSRF-Token", csrf)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		return res
+	}
+	if res := call("PUT", "/api/v1/drive/files?path=private.txt", "admin", adminCSRF, adminCookie); res.Code != 201 {
+		t.Fatalf("admin upload: %d", res.Code)
+	}
+	if res := call("GET", "/api/v1/drive/files?path=private.txt", "", "", userCookie); res.Code != 404 {
+		t.Fatalf("user reads admin file: %d", res.Code)
+	}
+	if res := call("PUT", "/api/v1/drive/files?path=private.txt", "user", userCSRF, userCookie); res.Code != 201 {
+		t.Fatalf("user upload: %d %s", res.Code, res.Body.String())
+	}
+	if res := call("GET", "/api/v1/drive/files?path=private.txt", "", "", adminCookie); res.Body.String() != "admin" {
+		t.Fatalf("admin file changed: %s", res.Body.String())
+	}
+	if res := call("GET", "/api/v1/drive/files?path=private.txt", "", "", userCookie); res.Body.String() != "user" {
+		t.Fatalf("user file changed: %s", res.Body.String())
 	}
 }

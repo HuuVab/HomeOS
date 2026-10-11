@@ -100,3 +100,42 @@ func TestAdminPersistsAndResetRevokesSessions(t *testing.T) {
 		t.Fatalf("restored administrator missing or invalid: %v", err)
 	}
 }
+
+func TestMultiuserMigrationPreservesSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.sqlite")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := migrations.ReadFile("migrations/0001_core.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(string(first)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO schema_migrations VALUES ('0001_core.sql', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO users (id,username,display_name,password_hash,role,created_at,updated_at) VALUES (1,'old_admin','old_admin','hash','admin',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO sessions (token_hash,user_id,csrf_token,created_at,expires_at) VALUES ('token',1,'csrf',1,?)`, time.Now().Add(time.Hour).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	user, _, err := upgraded.Session("token")
+	if err != nil || user.Username != "old_admin" {
+		t.Fatalf("session after migration: %+v %v", user, err)
+	}
+}

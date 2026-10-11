@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,9 +26,11 @@ type TrashEntry struct {
 }
 
 type Store struct {
-	root    *os.Root
-	mu      sync.Mutex
-	pending map[string]UploadSession
+	root     *os.Root
+	rootPath string
+	mu       sync.Mutex
+	pending  map[string]UploadSession
+	users    map[int64]*Store
 }
 
 type Entry struct {
@@ -54,7 +57,7 @@ func New(root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := &Store{root: opened, pending: make(map[string]UploadSession)}
+	store := &Store{root: opened, rootPath: absolute, pending: make(map[string]UploadSession), users: make(map[int64]*Store)}
 	if err := store.loadUploads(); err != nil {
 		opened.Close()
 		return nil, err
@@ -62,10 +65,44 @@ func New(root string) (*Store, error) {
 	return store, nil
 }
 
-func (s *Store) Close() error { return s.root.Close() }
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, child := range s.users {
+		_ = child.Close()
+	}
+	return s.root.Close()
+}
+
+func (s *Store) ForUser(id int64) (*Store, error) {
+	if id == 1 {
+		return s, nil
+	}
+	if id < 1 {
+		return nil, ErrInvalidPath
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if child := s.users[id]; child != nil {
+		return child, nil
+	}
+	if err := s.root.Mkdir(".homeos-users", 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return nil, err
+	}
+	info, err := s.root.Lstat(".homeos-users")
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, ErrInvalidPath
+	}
+	child, err := New(filepath.Join(s.rootPath, ".homeos-users", strconv.FormatInt(id, 10)))
+	if err != nil {
+		return nil, err
+	}
+	s.users[id] = child
+	return child, nil
+}
 
 func validPart(part string) bool {
-	if part == "" || part == "." || part == ".." || part == trashDir || strings.HasPrefix(part, ".homeos-upload-") ||
+	if part == "" || part == "." || part == ".." || part == trashDir || part == ".homeos-users" || strings.HasPrefix(part, ".homeos-upload-") ||
 		strings.ContainsAny(part, `\/:*?"<>|`) || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
 		return false
 	}
@@ -136,7 +173,7 @@ func (s *Store) List(path string) ([]Entry, error) {
 	}
 	entries := make([]Entry, 0, len(items))
 	for _, item := range items {
-		if item.Name() == trashDir || strings.HasPrefix(item.Name(), ".homeos-upload-") || item.Type()&os.ModeSymlink != 0 {
+		if item.Name() == trashDir || item.Name() == ".homeos-users" || strings.HasPrefix(item.Name(), ".homeos-upload-") || item.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		info, err := item.Info()

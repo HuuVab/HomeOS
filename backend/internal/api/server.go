@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,7 +29,33 @@ type statusResponse struct {
 func NewHandler(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store) http.Handler {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, db)
-	registerDriveRoutes(mux, db, files)
+	driveHandler := func(w http.ResponseWriter, r *http.Request) {
+		user, _, _, ok := authenticate(w, r, db)
+		if !ok {
+			return
+		}
+		userFiles, err := files.ForUser(user.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "storage_error", "Storage unavailable")
+			return
+		}
+		driveMux := http.NewServeMux()
+		registerDriveRoutes(driveMux, db, userFiles)
+		driveMux.ServeHTTP(w, r)
+		metadataChanged := r.Method == http.MethodPut || r.Method == http.MethodDelete ||
+			(r.Method == http.MethodPost && r.URL.Path != "/api/v1/drive/uploads")
+		if metadataChanged {
+			entries, err := userFiles.AllEntries()
+			if err == nil {
+				err = db.ReplaceFileEntries(user.ID, entries)
+			}
+			if err != nil {
+				log.Printf("HomeDrive metadata sync for user %d: %v", user.ID, err)
+			}
+		}
+	}
+	mux.HandleFunc("/api/v1/drive", driveHandler)
+	mux.HandleFunc("/api/v1/drive/", driveHandler)
 	mux.HandleFunc("GET /api/v1/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "alive"})
 	})

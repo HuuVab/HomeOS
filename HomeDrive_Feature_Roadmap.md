@@ -95,8 +95,8 @@
 
 ## 5. Sharing and permissions
 
-- [ ] **P0** Private user files and ownership
-- [ ] **P0** Server-enforced authorization for every file operation
+- [x] **P0** Private user files and ownership
+- [x] **P0** Server-enforced authorization for every file operation
 - [ ] **P1** Share with specific users
 - [ ] **P1** Public sharing links
 - [ ] **P1** Read-only and editable shares
@@ -121,7 +121,7 @@
 - [x] **P0** Secure password hashing
 - [x] **P0** Secure sessions
 - [ ] **P0** User profile
-- [ ] **P0** Account isolation
+- [x] **P0** Account isolation
 - [ ] **P1** Password reset and change
 - [ ] **P1** Multi-factor authentication
 - [ ] **P1** Session and device management
@@ -162,7 +162,7 @@
 - [ ] **P0** Authorization on every API endpoint
 - [x] **P0** Path traversal protection
 - [ ] **P0** Secure internal file paths
-- [ ] **P0** Database transactions for metadata
+- [x] **P0** Database transactions for metadata
 - [ ] **P0** Atomic upload commit
 - [ ] **P0** File size and quota enforcement
 - [ ] **P0** Rate limiting
