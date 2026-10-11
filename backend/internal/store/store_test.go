@@ -266,3 +266,38 @@ func TestFileMetadataReadsUseCommittedRows(t *testing.T) {
 		t.Fatalf("other owner = %+v, %v", other, err)
 	}
 }
+
+func TestTrashMetadataReconcilesAtomically(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "trash.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.CreateAdmin("admin_test", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	item := drive.TrashEntry{ID: "00000000000000000000000000000001", Path: "deleted.txt", DeletedAt: time.Unix(100, 0)}
+	if err := db.BeginFileMutation(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReconcileDriveMutation(1, nil, []drive.TrashEntry{item}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.TrashEntry(1, item.ID)
+	if err != nil || got.Path != item.Path {
+		t.Fatalf("trash entry = %+v, %v", got, err)
+	}
+	other, err := db.TrashEntries(2)
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other owner's trash = %+v, %v", other, err)
+	}
+	if err := db.BeginFileMutation(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReconcileDriveMutation(1, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.TrashEntry(1, item.ID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted Trash record = %v", err)
+	}
+}
