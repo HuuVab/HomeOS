@@ -168,3 +168,53 @@ func TestChunkFailureKeepsOffset(t *testing.T) {
 		t.Fatalf("offset after oversized chunk: %+v, %v", resumed, err)
 	}
 }
+
+func TestMoveTrashRestore(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "files")
+	files, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := files.CreateFolder("docs"); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Upload("docs/note.txt", strings.NewReader("important")); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Move("docs/note.txt", "renamed.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Move("docs", "docs/child"); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("move folder into itself: %v", err)
+	}
+	if err := files.Trash("renamed.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.Open("renamed.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("trashed file visible: %v", err)
+	}
+	trash, err := files.ListTrash()
+	if err != nil || len(trash) != 1 {
+		t.Fatalf("trash: %v, %v", trash, err)
+	}
+	if err := files.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err = New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	if err := files.Restore(trash[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	f, err := files.Open("renamed.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	content, err := io.ReadAll(f)
+	if err != nil || string(content) != "important" {
+		t.Fatalf("restored content: %q, %v", content, err)
+	}
+}

@@ -4,6 +4,7 @@ type Entry = { name: string; path: string; kind: 'file' | 'folder'; size: number
 
 type Props = { csrfToken: string }
 type UploadSession = { id: string; offset: number; size: number }
+type TrashEntry = { id: string; path: string }
 const chunkSize = 4 * 1024 * 1024
 
 async function fingerprint(file: File): Promise<string> {
@@ -30,6 +31,8 @@ export default function Drive({ csrfToken }: Props) {
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'size' | 'type'>('name')
   const [descending, setDescending] = useState(false)
   const [details, setDetails] = useState<string | null>(null)
+  const [showTrash, setShowTrash] = useState(false)
+  const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([])
   const visibleEntries = entries.filter((entry) => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => {
     const comparison = sortBy === 'date' ? a.modifiedAt.localeCompare(b.modifiedAt)
       : sortBy === 'size' ? a.size - b.size
@@ -51,6 +54,44 @@ export default function Drive({ csrfToken }: Props) {
       if (!signal?.aborted) setLoading(false)
     }
   }, [folder])
+
+  const loadTrash = useCallback(async () => {
+    const response = await fetch('/api/v1/drive/trash', { cache: 'no-store' })
+    if (!response.ok) throw new Error('Unable to load Trash')
+    const data: { entries: TrashEntry[] } = await response.json()
+    setTrashEntries(data.entries)
+  }, [])
+
+  useEffect(() => { if (showTrash) void loadTrash().catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to load Trash')) }, [showTrash, loadTrash])
+
+  async function changeEntry(entry: Entry, action: 'rename' | 'move' | 'trash') {
+    let endpoint = '/api/v1/drive/trash'
+    let payload: object = { path: entry.path }
+    if (action !== 'trash') {
+      const proposed = window.prompt(action === 'rename' ? 'New name' : 'Destination path from drive root', action === 'rename' ? entry.name : entry.path)
+      if (proposed === null) return
+      const to = action === 'rename' ? [...entry.path.split('/').slice(0, -1), proposed].filter(Boolean).join('/') : proposed
+      endpoint = '/api/v1/drive/move'
+      payload = { from: entry.path, to }
+    } else if (!window.confirm(`Move ${entry.name} to Trash?`)) return
+    setBusy(true)
+    try {
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify(payload) })
+      if (!response.ok) throw new Error(response.status === 409 ? 'Destination already exists' : 'Could not change this item')
+      await load()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not change this item') }
+    finally { setBusy(false) }
+  }
+
+  async function restoreEntry(entry: TrashEntry) {
+    setBusy(true)
+    try {
+      const response = await fetch(`/api/v1/drive/trash/${entry.id}/restore`, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } })
+      if (!response.ok) throw new Error(response.status === 409 ? 'Original location is occupied' : 'Could not restore item')
+      await Promise.all([loadTrash(), load()])
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not restore item') }
+    finally { setBusy(false) }
+  }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -125,6 +166,8 @@ export default function Drive({ csrfToken }: Props) {
     </div>
     <p className="drive-note">No fixed per-file cap. Uploads resume after interruption when you select the same file again; unfinished files stay hidden until complete.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
+    <button type="button" className="secondary-button" onClick={() => setShowTrash(!showTrash)}>{showTrash ? 'Show files' : 'Trash'}</button>
+    {showTrash ? <ul className="drive-list">{trashEntries.map((entry) => <li key={entry.id}><span>/{entry.path}</span><button type="button" disabled={busy} onClick={() => void restoreEntry(entry)}>Restore</button></li>)}{trashEntries.length === 0 && <li>Trash is empty.</li>}</ul> : <>
     <div className="drive-actions">
       <div><label htmlFor="drive-search">Find in this folder</label><input id="drive-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search filenames" /></div>
       <div><label htmlFor="drive-sort">Sort by</label><div className="drive-action-row"><select id="drive-sort" value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)}><option value="name">Name</option><option value="date">Modified date</option><option value="size">Size</option><option value="type">Type</option></select><button type="button" className="secondary-button" onClick={() => setDescending(!descending)} aria-label={descending ? 'Sort ascending' : 'Sort descending'}>{descending ? 'Descending' : 'Ascending'}</button></div></div>
@@ -134,9 +177,13 @@ export default function Drive({ csrfToken }: Props) {
       <ul className="drive-list">{visibleEntries.map((entry) => <li key={entry.path}>
         <span><span className="entry-kind">{entry.kind === 'folder' ? 'Folder' : 'File'}</span>{entry.name}</span>
         <button type="button" className="secondary-button" onClick={() => setDetails(details === entry.path ? null : entry.path)}>{details === entry.path ? 'Hide details' : 'Details'}</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeEntry(entry, 'rename')}>Rename</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeEntry(entry, 'move')}>Move</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeEntry(entry, 'trash')}>Delete</button>
         {entry.kind === 'folder' ? <button type="button" className="secondary-button" onClick={() => setFolder(entry.path)}>Open</button> :
           <a className="secondary-button download-link" href={`/api/v1/drive/files?path=${encodeURIComponent(entry.path)}`}>Download</a>}
         {details === entry.path && <div className="drive-note">Path: /{entry.path} · Size: {entry.size.toLocaleString()} bytes · Modified: {new Date(entry.modifiedAt).toLocaleString()}</div>}
       </li>)}</ul>}
+    </>}
   </section>
 }

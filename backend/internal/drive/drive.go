@@ -1,6 +1,9 @@
 package drive
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -12,6 +15,13 @@ import (
 )
 
 var ErrInvalidPath = errors.New("invalid drive path")
+
+const trashDir = ".homeos-trash"
+
+type TrashEntry struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
+}
 
 type Store struct {
 	root    *os.Root
@@ -54,7 +64,7 @@ func New(root string) (*Store, error) {
 func (s *Store) Close() error { return s.root.Close() }
 
 func validPart(part string) bool {
-	if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".homeos-upload-") ||
+	if part == "" || part == "." || part == ".." || part == trashDir || strings.HasPrefix(part, ".homeos-upload-") ||
 		strings.ContainsAny(part, `\/:*?"<>|`) || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
 		return false
 	}
@@ -125,7 +135,7 @@ func (s *Store) List(path string) ([]Entry, error) {
 	}
 	entries := make([]Entry, 0, len(items))
 	for _, item := range items {
-		if strings.HasPrefix(item.Name(), ".homeos-upload-") || item.Type()&os.ModeSymlink != 0 {
+		if item.Name() == trashDir || strings.HasPrefix(item.Name(), ".homeos-upload-") || item.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		info, err := item.Info()
@@ -154,6 +164,166 @@ func (s *Store) List(path string) ([]Entry, error) {
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 	return entries, nil
+}
+
+func (s *Store) Move(from, to string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if from == to || s.hasPendingBelow(from) || s.isPending(to) {
+		return ErrInvalidPath
+	}
+	source, err := s.resolve(from, false)
+	if err != nil {
+		return err
+	}
+	target, err := s.resolve(to, false)
+	if err != nil {
+		return err
+	}
+	info, err := s.root.Lstat(source)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() && strings.HasPrefix(to, from+"/") {
+		return ErrInvalidPath
+	}
+	if _, err := s.root.Lstat(target); err == nil {
+		return os.ErrExist
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return s.root.Rename(source, target)
+}
+
+func (s *Store) Trash(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hasPendingBelow(path) {
+		return ErrInvalidPath
+	}
+	source, err := s.resolve(path, false)
+	if err != nil {
+		return err
+	}
+	if _, err := s.root.Lstat(source); err != nil {
+		return err
+	}
+	if err := s.root.Mkdir(trashDir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return err
+	}
+	key := hex.EncodeToString(id[:])
+	meta := TrashEntry{ID: key, Path: path}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	metadata := trashDir + "/" + key + ".json"
+	f, err := s.root.OpenFile(metadata, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		s.root.Remove(metadata)
+		return err
+	}
+	if err := s.root.Rename(source, trashDir+"/"+key); err != nil {
+		s.root.Remove(metadata)
+		return err
+	}
+	return nil
+}
+
+func (s *Store) hasPendingBelow(path string) bool {
+	for _, upload := range s.pending {
+		if strings.EqualFold(upload.Path, path) || strings.HasPrefix(strings.ToLower(upload.Path), strings.ToLower(path)+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) ListTrash() ([]TrashEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir, err := s.root.Open(trashDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return []TrashEntry{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	items, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]TrashEntry, 0)
+	for _, item := range items {
+		if !strings.HasSuffix(item.Name(), ".json") || item.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		f, err := s.root.Open(trashDir + "/" + item.Name())
+		if err != nil {
+			return nil, err
+		}
+		var entry TrashEntry
+		err = json.NewDecoder(io.LimitReader(f, 4096)).Decode(&entry)
+		f.Close()
+		if err != nil || entry.ID+".json" != item.Name() {
+			return nil, ErrInvalidPath
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+
+func (s *Store) Restore(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(id) != 32 {
+		return ErrInvalidPath
+	}
+	if _, err := hex.DecodeString(id); err != nil {
+		return ErrInvalidPath
+	}
+	f, err := s.root.Open(trashDir + "/" + id + ".json")
+	if err != nil {
+		return err
+	}
+	var entry TrashEntry
+	err = json.NewDecoder(io.LimitReader(f, 4096)).Decode(&entry)
+	f.Close()
+	if err != nil || entry.ID != id {
+		return ErrInvalidPath
+	}
+	target, err := s.resolve(entry.Path, false)
+	if err != nil {
+		return err
+	}
+	if s.isPending(entry.Path) {
+		return os.ErrExist
+	}
+	if _, err := s.root.Lstat(target); err == nil {
+		return os.ErrExist
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := s.root.Rename(trashDir+"/"+id, target); err != nil {
+		return err
+	}
+	return s.root.Remove(trashDir + "/" + id + ".json")
 }
 
 func (s *Store) CreateFolder(path string) error {

@@ -38,6 +38,66 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 	})
+	mux.HandleFunc("POST /api/v1/drive/move", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Expected source and destination paths")
+			return
+		}
+		if err := files.Move(payload.From, payload.To); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/v1/drive/trash", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			Path string `json:"path"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Expected path")
+			return
+		}
+		if err := files.Trash(payload.Path); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/v1/drive/trash", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, false) {
+			return
+		}
+		entries, err := files.ListTrash()
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+	})
+	mux.HandleFunc("POST /api/v1/drive/trash/{id}/restore", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		if err := files.Restore(r.PathValue("id")); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /api/v1/drive/folders", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, true) {
 			return
