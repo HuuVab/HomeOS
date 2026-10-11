@@ -92,3 +92,39 @@ func (s *Store) SearchFileEntries(ownerID int64, query string) ([]drive.Entry, e
 	}
 	return entries, rows.Err()
 }
+
+// MetadataMatchesSnapshot detects out-of-band filesystem changes before a
+// PostgreSQL-backed mutation can publish them into the authoritative catalog.
+func (s *Store) MetadataMatchesSnapshot(ownerID int64, entries []drive.Entry) (bool, error) {
+	rows, err := s.db.Query(s.query(`SELECT path, kind, size, modified_at FROM file_entries WHERE owner_id = ?`), ownerID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	type metadata struct {
+		kind             string
+		size, modifiedAt int64
+	}
+	stored := make(map[string]metadata)
+	for rows.Next() {
+		var name string
+		var item metadata
+		if err := rows.Scan(&name, &item.kind, &item.size, &item.modifiedAt); err != nil {
+			return false, err
+		}
+		stored[name] = item
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if len(stored) != len(entries) {
+		return false, nil
+	}
+	for _, entry := range entries {
+		item, ok := stored[entry.Path]
+		if !ok || item.kind != entry.Kind || item.size != entry.Size || item.modifiedAt != entry.ModifiedAt.Unix() {
+			return false, nil
+		}
+	}
+	return true, nil
+}

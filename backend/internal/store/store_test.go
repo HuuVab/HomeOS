@@ -237,6 +237,12 @@ func TestFileMetadataReadsUseCommittedRows(t *testing.T) {
 	if err := db.ReplaceFileEntries(1, entries); err != nil {
 		t.Fatal(err)
 	}
+	if matches, err := db.MetadataMatchesSnapshot(1, entries); err != nil || !matches {
+		t.Fatalf("expected matching snapshot: %v, %v", matches, err)
+	}
+	if matches, err := db.MetadataMatchesSnapshot(1, entries[:2]); err != nil || matches {
+		t.Fatalf("missing file not detected: %v, %v", matches, err)
+	}
 	root, err := db.FileEntries(1, "")
 	if err != nil || len(root) != 2 {
 		t.Fatalf("root = %+v, %v", root, err)
