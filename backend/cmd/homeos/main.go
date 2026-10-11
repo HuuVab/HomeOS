@@ -153,7 +153,7 @@ func main() {
 				var trash []drive.TrashEntry
 				trash, err = userFiles.ListTrash()
 				if err == nil {
-					err = db.ReconcileDriveMutation(ownerID, entries, trash)
+					err = db.ReconcileDriveMutation(ownerID, entries, trash, userFiles.PendingUploads())
 				}
 			} else {
 				err = db.ReconcileFileMutation(ownerID, entries)
@@ -210,7 +210,7 @@ func main() {
 				trash, err = userFiles.ListTrash()
 			}
 			if err == nil {
-				err = db.ReconcileDriveMutation(ownerID, entries, trash)
+				err = db.ReconcileDriveMutation(ownerID, entries, trash, userFiles.PendingUploads())
 			}
 			if err != nil {
 				log.Printf("HomeDrive Trash cleanup for user %d: %v", ownerID, err)

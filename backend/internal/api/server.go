@@ -51,7 +51,7 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 				if err != nil {
 					return err
 				}
-				return db.ReconcileDriveMutation(user.ID, entries, trash)
+				return db.ReconcileDriveMutation(user.ID, entries, trash, userFiles.PendingUploads())
 			}
 			return db.ReconcileFileMutation(user.ID, entries)
 		}

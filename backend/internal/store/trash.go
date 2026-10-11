@@ -73,7 +73,7 @@ func (s *Store) replaceTrashEntriesTx(tx *sql.Tx, ownerID int64, entries []drive
 }
 
 // ReconcileDriveMutation publishes active files and Trash in one metadata transaction.
-func (s *Store) ReconcileDriveMutation(ownerID int64, entries []drive.Entry, trash []drive.TrashEntry) error {
+func (s *Store) ReconcileDriveMutation(ownerID int64, entries []drive.Entry, trash []drive.TrashEntry, uploads []drive.UploadSession) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -83,6 +83,9 @@ func (s *Store) ReconcileDriveMutation(ownerID int64, entries []drive.Entry, tra
 		return err
 	}
 	if err := s.replaceTrashEntriesTx(tx, ownerID, trash); err != nil {
+		return err
+	}
+	if err := s.reconcileUploadSessionsTx(tx, ownerID, uploads, entries); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(s.query(`DELETE FROM metadata_reconcile WHERE owner_id = ?`), ownerID); err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -280,7 +281,7 @@ func TestTrashMetadataReconcilesAtomically(t *testing.T) {
 	if err := db.BeginFileMutation(1); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.ReconcileDriveMutation(1, nil, []drive.TrashEntry{item}); err != nil {
+	if err := db.ReconcileDriveMutation(1, nil, []drive.TrashEntry{item}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := db.TrashEntry(1, item.ID)
@@ -294,10 +295,52 @@ func TestTrashMetadataReconcilesAtomically(t *testing.T) {
 	if err := db.BeginFileMutation(1); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.ReconcileDriveMutation(1, nil, nil); err != nil {
+	if err := db.ReconcileDriveMutation(1, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.TrashEntry(1, item.ID); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("deleted Trash record = %v", err)
+	}
+}
+
+func TestUploadSessionMetadataLifecycle(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "uploads.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.CreateAdmin("admin_test", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	session := drive.UploadSession{ID: "00000000000000000000000000000001", Path: "note.txt", Size: 4, Fingerprint: strings.Repeat("a", 64), Staged: true}
+	if err := db.UpsertUploadSession(1, session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.PendingUploadSession(2, session.ID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("other owner session = %v", err)
+	}
+	if err := db.SetUploadOffset(1, session.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := db.PendingUploadSession(1, session.ID)
+	if err != nil || pending.Offset != 2 {
+		t.Fatalf("pending session = %+v, %v", pending, err)
+	}
+	session.Offset = 2
+	if err := db.BeginFileMutation(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReconcileDriveMutation(1, nil, nil, []drive.UploadSession{session}); err != nil {
+		t.Fatal(err)
+	}
+	entry := drive.Entry{Name: "note.txt", Path: "note.txt", Kind: "file", Size: 4, ModifiedAt: time.Unix(100, 0)}
+	if err := db.BeginFileMutation(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReconcileDriveMutation(1, []drive.Entry{entry}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.PendingUploadSession(1, session.ID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("completed session remains pending: %v", err)
 	}
 }
