@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 type Session = {
   user: { id: number; username: string; displayName: string; role: string }
@@ -25,7 +25,7 @@ type Status = {
 }
 
 function formatMetric(metric: Metric): string {
-  if (metric.state !== 'available') return 'Unavailable'
+  if (metric.state === 'unavailable') return 'Unavailable'
   if (metric.unit === 'percent') return `${metric.value.toFixed(1)}%`
   if (metric.unit === 'bytes') return `${(metric.value / 1024 / 1024).toFixed(1)} MiB`
   if (metric.unit === 'seconds') {
@@ -47,13 +47,23 @@ export default function App() {
   const [data, setData] = useState<Status | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const activeRequest = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
+    if (activeRequest.current) return
+    const controller = new AbortController()
+    activeRequest.current = controller
+    let timedOut = false
+    const timeout = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, 5_000)
     try {
-      const response = await fetch('/api/v1/status', { cache: 'no-store' })
+      const response = await fetch('/api/v1/status', { cache: 'no-store', signal: controller.signal })
 	  if (response.status === 401) {
 	    setSession(null)
 	    setData(null)
+	    setError(null)
 	    return
 	  }
       if (!response.ok) throw new Error(`Status request failed (${response.status})`)
@@ -61,8 +71,12 @@ export default function App() {
       setData(next)
       setError(null)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to load status')
+      if (!controller.signal.aborted || timedOut) {
+        setError(timedOut ? 'Status request timed out' : cause instanceof Error ? cause.message : 'Unable to load status')
+      }
     } finally {
+      window.clearTimeout(timeout)
+      if (activeRequest.current === controller) activeRequest.current = null
       setLoading(false)
     }
   }, [])
@@ -80,7 +94,11 @@ export default function App() {
 	if (!session) return
     void refresh()
     const timer = window.setInterval(() => void refresh(), 1_000)
-    return () => window.clearInterval(timer)
+    return () => {
+      window.clearInterval(timer)
+      activeRequest.current?.abort()
+      activeRequest.current = null
+    }
   }, [refresh, session])
 
 	async function signIn(event: FormEvent<HTMLFormElement>) {
@@ -95,6 +113,9 @@ export default function App() {
 	    })
 	    if (!response.ok) throw new Error(response.status === 429 ? 'Too many attempts. Wait a minute and try again.' : 'Invalid username or password.')
 	    setSession((await response.json()) as Session)
+	    setData(null)
+	    setError(null)
+	    setLoading(true)
 	    setPassword('')
 	  } catch (cause) {
 	    setLoginError(cause instanceof Error ? cause.message : 'Unable to sign in')
@@ -113,6 +134,7 @@ export default function App() {
 	    if (!response.ok) throw new Error('Unable to sign out. Please try again.')
 	    setSession(null)
 	    setData(null)
+	    setError(null)
 	  } catch {
 	    setError('Unable to sign out. Please try again.')
 	  }
@@ -170,14 +192,16 @@ export default function App() {
       </div>
 
       <section className="cards" aria-label="System metrics">
-        {data?.metrics.map((metric) => (
-          <article className="card" key={metric.id}>
+        {data?.metrics.map((metric) => {
+          const stale = Boolean(error) || metric.state === 'stale'
+          return <article className={`card ${stale ? 'card-stale' : ''}`} key={metric.id}>
             <div className="card-top"><span>{metric.label}</span><span className="scope">{metric.scope}</span></div>
+            {stale && <span className="stale-label">Last known value</span>}
             <p className="value">{formatMetric(metric)}</p>
             {(metric.detail || metric.reason) && <p className="metric-detail">{metric.detail ?? metric.reason}</p>}
-            <p className="card-foot">Updated {new Date(metric.sampledAt).toLocaleTimeString()}</p>
+            <p className="card-foot">{stale ? 'Last good sample' : 'Updated'} {new Date(metric.sampledAt).toLocaleTimeString()}</p>
           </article>
-        ))}
+        })}
         {!data && <p className="empty">{loading ? 'Loading measurements…' : 'No measurements available.'}</p>}
       </section>
 

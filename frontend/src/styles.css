@@ -21,6 +21,9 @@ button:hover { background: #b5f5dc; }
 button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
 .card { min-height: 185px; padding: 24px; background: #1a2832; border: 1px solid #31434d; border-radius: 16px; }
+.card-stale { border-color: #ad7557; }
+.stale-label { display: inline-block; margin-top: 15px; color: #ffc5a5; font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.stale-label + .value { margin-top: 8px; }
 .card-top { color: #c4d2d8; font-weight: 650; }
 .scope { padding: 5px 9px; font-weight: 500; }
 .value { font-size: 2.35rem; letter-spacing: -.05em; font-weight: 750; margin-top: 24px; }
