@@ -121,7 +121,15 @@ func (s *Store) migrate() error {
 		if err != nil {
 			return err
 		}
-		if _, err = tx.Exec(string(statement)); err == nil {
+		for _, command := range strings.Split(string(statement), ";") {
+			if strings.TrimSpace(command) == "" {
+				continue
+			}
+			if _, err = tx.Exec(command); err != nil {
+				break
+			}
+		}
+		if err == nil {
 			_, err = tx.Exec(s.query(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`), entry.Name(), time.Now().Unix())
 		}
 		if err != nil {
