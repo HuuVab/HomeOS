@@ -1,0 +1,92 @@
+package store
+
+import (
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"net/url"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/HuuVab/HomeOS/backend/internal/drive"
+)
+
+// Set HOMEOS_TEST_POSTGRES_URL to run this against a disposable PostgreSQL
+// database. The test creates and drops only its own randomly named schema.
+func TestPostgresMetadataIntegration(t *testing.T) {
+	connectionURL := os.Getenv("HOMEOS_TEST_POSTGRES_URL")
+	if connectionURL == "" {
+		t.Skip("HOMEOS_TEST_POSTGRES_URL is not configured")
+	}
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		t.Fatal(err)
+	}
+	schema := "homedrive_test_" + hex.EncodeToString(random[:])
+	admin, err := sql.Open("pgx", connectionURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	if _, err := admin.Exec(`CREATE SCHEMA "` + schema + `"`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := admin.Exec(`DROP SCHEMA "` + schema + `" CASCADE`); err != nil {
+			t.Errorf("remove isolated test schema: %v", err)
+		}
+	}()
+	parsed, err := url.Parse(connectionURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameters := parsed.Query()
+	parameters.Set("options", "-csearch_path="+schema)
+	parsed.RawQuery = parameters.Encode()
+	db, err := OpenPostgres(parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !db.AuthoritativeMetadata() {
+		t.Fatal("PostgreSQL metadata mode disabled")
+	}
+	if err := db.CreateAdmin("test_admin", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateUser("second_user", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Unix(100, 0)
+	entries := []drive.Entry{{Name: "docs", Path: "docs", Kind: "folder", ModifiedAt: stamp}, {Name: "note.txt", Path: "docs/note.txt", Kind: "file", Size: 4, ModifiedAt: stamp}}
+	if err := db.BeginFileMutation(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReconcileFileMutation(1, entries); err != nil {
+		t.Fatal(err)
+	}
+	children, err := db.FileEntries(1, "docs")
+	if err != nil || len(children) != 1 || children[0].Path != "docs/note.txt" {
+		t.Fatalf("children = %+v, %v", children, err)
+	}
+	other, err := db.FileEntries(2, "")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other owner's entries = %+v, %v", other, err)
+	}
+	events, err := db.ChangesAfter(1, 0, 100)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("events = %+v, %v", events, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = OpenPostgres(parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	children, err = db.FileEntries(1, "docs")
+	if err != nil || len(children) != 1 {
+		t.Fatalf("entries after restart = %+v, %v", children, err)
+	}
+}
