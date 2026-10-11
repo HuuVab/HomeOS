@@ -246,6 +246,13 @@ func (s *Store) BeginFileMutation(ownerID int64) error {
 	return err
 }
 
+// CancelFileMutation clears a marker when validation or the filesystem
+// operation failed before publishing any visible file change.
+func (s *Store) CancelFileMutation(ownerID int64) error {
+	_, err := s.db.Exec(s.query(`DELETE FROM metadata_reconcile WHERE owner_id = ?`), ownerID)
+	return err
+}
+
 // ReconcileFileMutation atomically publishes the filesystem snapshot and clears
 // its recovery marker. On error the marker remains for a later retry.
 func (s *Store) ReconcileFileMutation(ownerID int64, entries []drive.Entry) error {
