@@ -119,3 +119,15 @@ func (s *Store) reconcileUploadSessionsTx(tx *sql.Tx, ownerID int64, active []dr
 	}
 	return nil
 }
+
+func (s *Store) RecoverUploadSessions(ownerID int64, active []drive.UploadSession, entries []drive.Entry) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.reconcileUploadSessionsTx(tx, ownerID, active, entries); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
