@@ -1,0 +1,4 @@
+Welcome to HomeDrive Samples.
+
+These files are safe examples for trying search, sorting, rename, copy, move,
+Trash, restore, and ZIP download. You can remove the sample folder at any time.

@@ -1,0 +1,7 @@
+{
+  "project": "HomeDrive demo",
+  "tasks": [
+    { "title": "Try folder search", "done": false },
+    { "title": "Download this folder as ZIP", "done": false }
+  ]
+}
