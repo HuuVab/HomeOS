@@ -389,7 +389,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 				return
 			}
 		}
-		newOffset, err := files.AppendChunk(r.PathValue("id"), offset, r.Body)
+		newOffset, err := files.AppendChunkVerified(r.PathValue("id"), offset, r.Body, r.Header.Get("X-Chunk-SHA256"))
 		if err != nil {
 			driveError(w, err)
 			return
@@ -461,6 +461,8 @@ func driveError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "already_exists", "File or folder already exists")
 	case errors.Is(err, drive.ErrOffset):
 		writeError(w, http.StatusConflict, "offset_mismatch", "Upload offset does not match the stored file")
+	case errors.Is(err, drive.ErrChecksum):
+		writeError(w, http.StatusBadRequest, "checksum_mismatch", "Upload chunk SHA-256 does not match")
 	case errors.Is(err, drive.ErrTooLarge):
 		writeError(w, http.StatusRequestEntityTooLarge, "chunk_too_large", "Upload chunk exceeds the allowed size")
 	case errors.Is(err, drive.ErrQuotaExceeded):

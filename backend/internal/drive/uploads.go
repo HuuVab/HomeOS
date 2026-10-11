@@ -2,6 +2,8 @@ package drive
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,6 +17,7 @@ const MaxChunkSize int64 = 8 << 20
 
 var ErrOffset = errors.New("upload offset mismatch")
 var ErrTooLarge = errors.New("upload chunk too large")
+var ErrChecksum = errors.New("upload chunk checksum mismatch")
 
 type UploadSession struct {
 	ID          string `json:"id"`
@@ -225,6 +228,18 @@ func (s *Store) StartUpload(path string, size int64, fingerprint string) (Upload
 }
 
 func (s *Store) AppendChunk(id string, offset int64, reader io.Reader) (int64, error) {
+	return s.appendChunk(id, offset, reader, "")
+}
+
+// AppendChunkVerified commits a chunk only when its SHA-256 digest matches.
+func (s *Store) AppendChunkVerified(id string, offset int64, reader io.Reader, checksum string) (int64, error) {
+	if !validFingerprint(checksum) {
+		return offset, ErrChecksum
+	}
+	return s.appendChunk(id, offset, reader, strings.ToLower(checksum))
+}
+
+func (s *Store) appendChunk(id string, offset int64, reader io.Reader, checksum string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	session, ok := s.pending[id]
@@ -260,9 +275,13 @@ func (s *Store) AppendChunk(id string, offset int64, reader io.Reader) (int64, e
 		return offset, err
 	}
 	limit := min(MaxChunkSize, session.Size-offset)
-	written, err := io.Copy(file, io.LimitReader(reader, limit+1))
+	hash := sha256.New()
+	written, err := io.Copy(file, io.TeeReader(io.LimitReader(reader, limit+1), hash))
 	if err == nil && written > limit {
 		err = ErrTooLarge
+	}
+	if err == nil && checksum != "" && subtle.ConstantTimeCompare([]byte(hex.EncodeToString(hash.Sum(nil))), []byte(checksum)) != 1 {
+		err = ErrChecksum
 	}
 	if err == nil {
 		err = file.Sync()

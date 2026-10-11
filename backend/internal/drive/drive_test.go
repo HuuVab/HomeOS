@@ -173,6 +173,27 @@ func TestChunkFailureKeepsOffset(t *testing.T) {
 	}
 }
 
+func TestVerifiedChunkRejectsMismatchWithoutAdvancing(t *testing.T) {
+	files, err := New(filepath.Join(t.TempDir(), "files"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	session, err := files.StartUpload("verified.txt", 5, strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.AppendChunkVerified(session.ID, 0, strings.NewReader("hello"), strings.Repeat("0", 64)); !errors.Is(err, ErrChecksum) {
+		t.Fatalf("mismatched checksum: %v", err)
+	}
+	if pending := files.PendingUploads(); len(pending) != 1 || pending[0].Offset != 0 {
+		t.Fatalf("offset after mismatch: %+v", pending)
+	}
+	if offset, err := files.AppendChunkVerified(session.ID, 0, strings.NewReader("hello"), "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"); err != nil || offset != 5 {
+		t.Fatalf("verified chunk: %d, %v", offset, err)
+	}
+}
+
 func TestMoveTrashRestore(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "files")
 	files, err := New(root)

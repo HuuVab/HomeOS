@@ -236,7 +236,8 @@ export default function Drive({ csrfToken }: Props) {
         setProgress(file.size ? offset / file.size : 1)
         while (offset < file.size) {
           const chunk = file.slice(offset, offset + chunkSize)
-          const result = await fetch(`/api/v1/drive/uploads/${session.id}`, { method: 'PATCH', headers: { 'X-CSRF-Token': csrfToken, 'X-Upload-Offset': String(offset) }, body: chunk })
+          const chunkHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await chunk.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('')
+          const result = await fetch(`/api/v1/drive/uploads/${session.id}`, { method: 'PATCH', headers: { 'X-CSRF-Token': csrfToken, 'X-Upload-Offset': String(offset), 'X-Chunk-SHA256': chunkHash }, body: chunk })
           if (!result.ok) throw await responseError(result)
           const next: { offset: number } = await result.json()
           if (next.offset <= offset || next.offset > file.size) throw new Error('Upload progress was invalid.')
