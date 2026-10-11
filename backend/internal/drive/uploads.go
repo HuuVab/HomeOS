@@ -120,6 +120,16 @@ func (s *Store) isPending(path string) bool {
 	return false
 }
 
+func (s *Store) PendingUploads() []UploadSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sessions := make([]UploadSession, 0, len(s.pending))
+	for _, session := range s.pending {
+		sessions = append(sessions, session)
+	}
+	return sessions
+}
+
 func (s *Store) StartUpload(path string, size int64, fingerprint string) (UploadSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
