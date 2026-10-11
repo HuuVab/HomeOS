@@ -22,7 +22,7 @@ The [local development guide](docs/development.md) shows how to run the first wo
 
 The [deployment and backup guide](docs/deployment.md) describes Docker packaging and SQLite backup/restore.
 
-The [HomeDrive v0.2 guide](docs/v0.2-homedrive.md) documents its storage boundaries, API, limits, and separate file-backup requirement.
+The [HomeDrive v0.2 guide](docs/v0.2-homedrive.md) documents its storage boundaries, API, large-file behavior, and separate file-backup requirement. The web app has a service sidebar; unfinished modules are explicitly marked as planned.
 
 ## Planned repository layout
 

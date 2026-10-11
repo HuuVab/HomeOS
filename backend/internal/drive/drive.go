@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-const MaxUploadBytes = 100 << 20
-
 var ErrInvalidPath = errors.New("invalid drive path")
-var ErrTooLarge = errors.New("file exceeds 100 MiB limit")
 
 type Store struct{ root *os.Root }
 
@@ -173,12 +170,8 @@ func (s *Store) Upload(path string, reader io.Reader) error {
 		}
 	}()
 	defer file.Close()
-	n, err := io.Copy(file, io.LimitReader(reader, MaxUploadBytes+1))
-	if err != nil {
+	if _, err := io.Copy(file, reader); err != nil {
 		return err
-	}
-	if n > MaxUploadBytes {
-		return ErrTooLarge
 	}
 	if err := file.Sync(); err != nil {
 		return err

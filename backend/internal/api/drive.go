@@ -60,10 +60,6 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		if !check(w, r, true) {
 			return
 		}
-		if r.ContentLength > drive.MaxUploadBytes {
-			driveError(w, drive.ErrTooLarge)
-			return
-		}
 		if err := files.Upload(r.URL.Query().Get("path"), r.Body); err != nil {
 			driveError(w, err)
 			return
@@ -96,8 +92,6 @@ func driveError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, drive.ErrInvalidPath):
 		writeError(w, http.StatusBadRequest, "invalid_path", "Invalid drive path")
-	case errors.Is(err, drive.ErrTooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "too_large", "File exceeds 100 MiB limit")
 	case errors.Is(err, os.ErrNotExist):
 		writeError(w, http.StatusNotFound, "not_found", "File or folder not found")
 	case errors.Is(err, os.ErrExist):

@@ -2,11 +2,53 @@ package drive
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type zeroReader struct{}
+
+func (zeroReader) Read(buffer []byte) (int, error) {
+	clear(buffer)
+	return len(buffer), nil
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestLargeUploadAndFailedUploadCleanup(t *testing.T) {
+	files, err := New(filepath.Join(t.TempDir(), "files"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	const size = 101 << 20
+	if err := files.Upload("large.bin", io.LimitReader(zeroReader{}, size)); err != nil {
+		t.Fatal(err)
+	}
+	file, err := files.Open("large.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := file.Stat()
+	file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != size {
+		t.Fatalf("uploaded size = %d, want %d", info.Size(), size)
+	}
+	if err := files.Upload("partial.bin", io.MultiReader(strings.NewReader("partial"), failingReader{})); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("failed upload = %v", err)
+	}
+	if _, err := files.Open("partial.bin"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial file remains: %v", err)
+	}
+}
 
 func TestPathsStayInsideRoot(t *testing.T) {
 	parent := t.TempDir()

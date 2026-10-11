@@ -25,6 +25,27 @@ type Status = {
   metrics: Metric[]
 }
 
+const services = [
+  { id: 'overview', label: 'Overview', group: 'Home', description: 'Your HomeOS starting point.', ready: true },
+  { id: 'drive', label: 'HomeDrive', group: 'Personal cloud', description: 'Files and folders on your homelab disk.', ready: true },
+  { id: 'music', label: 'HomeMusic', group: 'Personal cloud', description: 'Music library and streaming are planned.', ready: false },
+  { id: 'photos', label: 'HomePhotos', group: 'Personal cloud', description: 'Photo galleries and albums are planned.', ready: false },
+  { id: 'git', label: 'HomeGit', group: 'Personal cloud', description: 'Repository hosting and browsing are planned.', ready: false },
+  { id: 'sync', label: 'HomeSync', group: 'Personal cloud', description: 'Cross-device synchronization is planned.', ready: false },
+  { id: 'monitor', label: 'HomeMonitor', group: 'Infrastructure', description: 'Live host and application measurements.', ready: true },
+  { id: 'docker', label: 'HomeDocker', group: 'Infrastructure', description: 'Safe container monitoring and controls are planned.', ready: false },
+  { id: 'network', label: 'HomeNetwork', group: 'Infrastructure', description: 'Network information and administration are planned.', ready: false },
+  { id: 'backup', label: 'HomeBackup', group: 'Infrastructure', description: 'Scheduled backup and restore controls are planned.', ready: false },
+  { id: 'cam', label: 'HomeCam', group: 'Infrastructure', description: 'Camera viewing and recording are planned.', ready: false },
+  { id: 'tasks', label: 'HomeTasks', group: 'Automation', description: 'Scheduled jobs and workflows are planned.', ready: false },
+  { id: 'ai', label: 'HomeAI', group: 'Automation', description: 'Optional AI-assisted features are planned.', ready: false },
+] as const
+
+function sectionFromHash(): string {
+  const id = window.location.hash.replace(/^#\//, '')
+  return services.some((service) => service.id === id) ? id : 'overview'
+}
+
 function formatMetric(metric: Metric): string {
   if (metric.state === 'unavailable') return 'Unavailable'
   if (metric.unit === 'percent') return `${metric.value.toFixed(1)}%`
@@ -48,7 +69,14 @@ export default function App() {
   const [data, setData] = useState<Status | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activeSection, setActiveSection] = useState(sectionFromHash)
   const activeRequest = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    const onHashChange = () => setActiveSection(sectionFromHash())
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
 
   const refresh = useCallback(async () => {
     if (activeRequest.current) return
@@ -162,56 +190,71 @@ export default function App() {
 	  </main>
 	)
 
-  return (
-    <main className="shell">
+  const current = services.find((service) => service.id === activeSection) ?? services[0]
+
+  const health = <section className="overview" aria-live="polite">
+    <div>
+      <p className="eyebrow">System overview</p>
+      <h2>{loading ? 'Connecting…' : error ? 'Connection needs attention' : 'Application is healthy'}</h2>
+      <p>{error ?? 'Live measurements from your Windows host and HomeOS.'}</p>
+    </div>
+    <div className={`status-pill ${error ? 'status-error' : ''}`}>
+      <span className="status-dot" /> {error ? 'Unavailable' : loading ? 'Checking' : 'Online'}
+    </div>
+  </section>
+
+  return <div className="app-layout">
+    <aside className="sidebar">
+      <a className="sidebar-brand" href="#/overview">HomeOS<span>Personal cloud · Homelab</span></a>
+      <nav className="sidebar-nav" aria-label="Services">
+        {['Home', 'Personal cloud', 'Infrastructure', 'Automation'].map((group) =>
+          <div className="nav-group" key={group}>
+            <p className="nav-group-title">{group}</p>
+            {services.filter((service) => service.group === group).map((service) =>
+              <a key={service.id} className={`nav-link ${activeSection === service.id ? 'nav-active' : ''}`} href={`#/${service.id}`} aria-current={activeSection === service.id ? 'page' : undefined}>
+                <span>{service.label}</span>{!service.ready && <small>Planned</small>}
+              </a>)}
+          </div>)}
+      </nav>
+    </aside>
+
+    <main className="main-panel">
       <header className="header">
-        <div>
-          <p className="eyebrow">Personal cloud · Homelab</p>
-          <h1>HomeOS</h1>
-          <p className="subtitle">A clear view of your home server.</p>
-        </div>
-		<div className="header-actions"><span className="version">{session.user.username}</span><button type="button" className="secondary-button" onClick={() => void signOut()}>Sign out</button></div>
+        <div><p className="eyebrow">{current.group}</p><h1>{current.label}</h1><p className="subtitle">{current.description}</p></div>
+        <div className="header-actions"><span className="version">{session.user.username}</span><button type="button" className="secondary-button" onClick={() => void signOut()}>Sign out</button></div>
       </header>
 
-      <section className="overview" aria-live="polite">
-        <div>
-          <p className="eyebrow">System overview</p>
-          <h2>{loading ? 'Connecting…' : error ? 'Connection needs attention' : 'Application is healthy'}</h2>
-          <p>{error ?? 'Live measurements from your Windows host and HomeOS.'}</p>
-        </div>
-        <div className={`status-pill ${error ? 'status-error' : ''}`}>
-          <span className="status-dot" /> {error ? 'Unavailable' : loading ? 'Checking' : 'Online'}
-        </div>
-      </section>
+      {activeSection === 'overview' && <>
+        {health}
+        <div className="section-heading"><div><p className="eyebrow">Available now</p><h2>Services</h2></div></div>
+        <section className="service-grid" aria-label="Available services">
+          <a className="service-card" href="#/drive"><span>HomeDrive</span><p>Browse folders, upload files, and download them from your homelab disk.</p><strong>Open Drive →</strong></a>
+          <a className="service-card" href="#/monitor"><span>HomeMonitor</span><p>See live CPU, memory, disk, and application measurements.</p><strong>Open Monitor →</strong></a>
+        </section>
+      </>}
 
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Live status</p>
-          <h2>System metrics</h2>
-        </div>
-        <button type="button" onClick={() => void refresh()}>Refresh now</button>
-      </div>
+      {activeSection === 'monitor' && <>
+        {health}
+        <div className="section-heading"><div><p className="eyebrow">Live status</p><h2>System metrics</h2></div><button type="button" onClick={() => void refresh()}>Refresh now</button></div>
+        <section className="cards" aria-label="System metrics">
+          {data?.metrics.map((metric) => {
+            const stale = Boolean(error) || metric.state === 'stale'
+            return <article className={`card ${stale ? 'card-stale' : ''}`} key={metric.id}>
+              <div className="card-top"><span>{metric.label}</span><span className="scope">{metric.scope}</span></div>
+              {stale && <span className="stale-label">Last known value</span>}
+              <p className="value">{formatMetric(metric)}</p>
+              {(metric.detail || metric.reason) && <p className="metric-detail">{metric.detail ?? metric.reason}</p>}
+              <p className="card-foot">{stale ? 'Last good sample' : 'Updated'} {new Date(metric.sampledAt).toLocaleTimeString()}</p>
+            </article>
+          })}
+          {!data && <p className="empty">{loading ? 'Loading measurements…' : 'No measurements available.'}</p>}
+        </section>
+        <footer><span>Automatic refresh every second</span><span>{data ? `Last successful update: ${new Date(data.sampledAt).toLocaleTimeString()}` : 'Awaiting first update'}</span></footer>
+      </>}
 
-      <section className="cards" aria-label="System metrics">
-        {data?.metrics.map((metric) => {
-          const stale = Boolean(error) || metric.state === 'stale'
-          return <article className={`card ${stale ? 'card-stale' : ''}`} key={metric.id}>
-            <div className="card-top"><span>{metric.label}</span><span className="scope">{metric.scope}</span></div>
-            {stale && <span className="stale-label">Last known value</span>}
-            <p className="value">{formatMetric(metric)}</p>
-            {(metric.detail || metric.reason) && <p className="metric-detail">{metric.detail ?? metric.reason}</p>}
-            <p className="card-foot">{stale ? 'Last good sample' : 'Updated'} {new Date(metric.sampledAt).toLocaleTimeString()}</p>
-          </article>
-        })}
-        {!data && <p className="empty">{loading ? 'Loading measurements…' : 'No measurements available.'}</p>}
-      </section>
+      {activeSection === 'drive' && <Drive csrfToken={session.csrfToken} />}
 
-      <Drive csrfToken={session.csrfToken} />
-
-      <footer>
-        <span>Automatic refresh every second</span>
-        <span>{data ? `Last successful update: ${new Date(data.sampledAt).toLocaleTimeString()}` : 'Awaiting first update'}</span>
-      </footer>
+      {!current.ready && <section className="planned-panel"><span className="planned-badge">Planned service</span><h2>{current.label} is not active yet</h2><p>{current.description} This page will become its own dashboard as the module is built. No controls are available here yet.</p></section>}
     </main>
-  )
+  </div>
 }
