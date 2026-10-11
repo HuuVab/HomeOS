@@ -138,13 +138,28 @@ func (s *Store) AllEntries() ([]Entry, error) {
 
 func (s *Store) OpenPreview(name string) (*os.File, string, error) {
 	extension := strings.ToLower(path.Ext(name))
-	contentType := map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf"}[extension]
+	contentType := map[string]string{
+		".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf",
+		".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8", ".json": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
+		".go": "text/plain; charset=utf-8", ".js": "text/plain; charset=utf-8", ".ts": "text/plain; charset=utf-8", ".tsx": "text/plain; charset=utf-8", ".py": "text/plain; charset=utf-8", ".css": "text/plain; charset=utf-8",
+	}[extension]
 	if contentType == "" {
 		return nil, "", ErrInvalidPath
 	}
 	file, err := s.Open(name)
 	if err != nil {
 		return nil, "", err
+	}
+	if strings.HasPrefix(contentType, "text/plain") {
+		info, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return nil, "", err
+		}
+		if info.Size() > 1<<20 {
+			file.Close()
+			return nil, "", ErrTooLarge
+		}
 	}
 	return file, contentType, nil
 }

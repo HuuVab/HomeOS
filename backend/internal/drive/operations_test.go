@@ -70,7 +70,9 @@ func TestSearchAcrossFolders(t *testing.T) {
 		t.Fatalf("preview: %s %v", kind, err)
 	}
 	preview.Close()
-	if _, _, err := files.OpenPreview("notes.txt"); err == nil {
-		t.Fatal("unexpected text preview")
+	textPreview, kind, err := files.OpenPreview("notes.txt")
+	if err != nil || kind != "text/plain; charset=utf-8" {
+		t.Fatalf("text preview: %s %v", kind, err)
 	}
+	textPreview.Close()
 }
