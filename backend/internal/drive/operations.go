@@ -214,6 +214,23 @@ func (s *Store) WriteZip(folder string, output io.Writer) error {
 	return archive.Close()
 }
 
+func (s *Store) ValidateFolder(folder string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	target, err := s.resolve(folder, false)
+	if err != nil {
+		return err
+	}
+	info, err := s.root.Lstat(target)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return ErrInvalidPath
+	}
+	return nil
+}
+
 func (s *Store) addZipDirectory(archive *zip.Writer, directory, archivePath string) error {
 	if _, err := archive.Create(archivePath + "/"); err != nil {
 		return err

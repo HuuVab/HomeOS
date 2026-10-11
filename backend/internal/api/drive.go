@@ -115,6 +115,10 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			return
 		}
 		folder := r.URL.Query().Get("path")
+		if err := files.ValidateFolder(folder); err != nil {
+			driveError(w, err)
+			return
+		}
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(folder) + ".zip"}))
 		if err := files.WriteZip(folder, w); err != nil {

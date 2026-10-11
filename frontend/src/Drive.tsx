@@ -175,6 +175,8 @@ export default function Drive({ csrfToken }: Props) {
       }
       const complete = await fetch(`/api/v1/drive/uploads/${session.id}/complete`, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } })
       if (!complete.ok) throw new Error('Upload verification failed. Select the same file and try again.')
+      setUploads((remaining) => remaining.slice(1))
+      setProgress(null)
       }
       setUploads([])
       setProgress(null)
