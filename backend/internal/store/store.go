@@ -231,6 +231,23 @@ func (s *Store) CreateUser(username, passwordHash string) error {
 	return err
 }
 
+func (s *Store) UserIDs() ([]int64, error) {
+	rows, err := s.db.Query(`SELECT id FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (s *Store) ReplaceFileEntries(ownerID int64, entries []drive.Entry) error {
 	tx, err := s.db.Begin()
 	if err != nil {
