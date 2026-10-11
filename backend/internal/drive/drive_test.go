@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type zeroReader struct{}
@@ -216,5 +217,48 @@ func TestMoveTrashRestore(t *testing.T) {
 	content, err := io.ReadAll(f)
 	if err != nil || string(content) != "important" {
 		t.Fatalf("restored content: %q, %v", content, err)
+	}
+}
+
+func TestTrashRetentionAndPermanentDeletion(t *testing.T) {
+	files, err := New(filepath.Join(t.TempDir(), "files"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	if err := files.CreateFolder("album"); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Upload("album/photo.txt", strings.NewReader("content")); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Trash("album"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := files.ListTrash()
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("trash: %v %v", entries, err)
+	}
+	if count, err := files.PurgeExpired(30*24*time.Hour, entries[0].DeletedAt.Add(29*24*time.Hour)); err != nil || count != 0 {
+		t.Fatalf("early purge: %d %v", count, err)
+	}
+	if count, err := files.PurgeExpired(30*24*time.Hour, entries[0].DeletedAt.Add(31*24*time.Hour)); err != nil || count != 1 {
+		t.Fatalf("expired purge: %d %v", count, err)
+	}
+	if err := files.Restore(entries[0].ID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("restored deleted item: %v", err)
+	}
+	if err := files.Upload("other.txt", strings.NewReader("content")); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Trash("other.txt"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = files.ListTrash()
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("trash: %v %v", entries, err)
+	}
+	if err := files.DeleteForever(entries[0].ID); err != nil {
+		t.Fatal(err)
 	}
 }

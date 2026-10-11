@@ -19,8 +19,9 @@ var ErrInvalidPath = errors.New("invalid drive path")
 const trashDir = ".homeos-trash"
 
 type TrashEntry struct {
-	ID   string `json:"id"`
-	Path string `json:"path"`
+	ID        string    `json:"id"`
+	Path      string    `json:"path"`
+	DeletedAt time.Time `json:"deletedAt"`
 }
 
 type Store struct {
@@ -216,7 +217,7 @@ func (s *Store) Trash(path string) error {
 		return err
 	}
 	key := hex.EncodeToString(id[:])
-	meta := TrashEntry{ID: key, Path: path}
+	meta := TrashEntry{ID: key, Path: path, DeletedAt: time.Now().UTC()}
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return err
@@ -243,6 +244,79 @@ func (s *Store) Trash(path string) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Store) removeTree(path string) error {
+	info, err := s.root.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		dir, err := s.root.Open(path)
+		if err != nil {
+			return err
+		}
+		items, err := dir.ReadDir(-1)
+		dir.Close()
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := s.removeTree(path + "/" + item.Name()); err != nil {
+				return err
+			}
+		}
+	}
+	return s.root.Remove(path)
+}
+
+func (s *Store) DeleteForever(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(id) != 32 {
+		return ErrInvalidPath
+	}
+	if _, err := hex.DecodeString(id); err != nil {
+		return ErrInvalidPath
+	}
+	metadata := trashDir + "/" + id + ".json"
+	if _, err := s.root.Lstat(metadata); err != nil {
+		return err
+	}
+	if err := s.removeTree(trashDir + "/" + id); err != nil {
+		return err
+	}
+	return s.root.Remove(metadata)
+}
+
+func (s *Store) PurgeExpired(retention time.Duration, now time.Time) (int, error) {
+	if retention <= 0 {
+		return 0, ErrInvalidPath
+	}
+	entries, err := s.ListTrash()
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, entry := range entries {
+		deletedAt := entry.DeletedAt
+		if deletedAt.IsZero() {
+			s.mu.Lock()
+			info, statErr := s.root.Stat(trashDir + "/" + entry.ID + ".json")
+			s.mu.Unlock()
+			if statErr != nil {
+				return removed, statErr
+			}
+			deletedAt = info.ModTime()
+		}
+		if !deletedAt.Add(retention).After(now) {
+			if err := s.DeleteForever(entry.ID); err != nil {
+				return removed, err
+			}
+			removed++
+		}
+	}
+	return removed, nil
 }
 
 func (s *Store) hasPendingBelow(path string) bool {

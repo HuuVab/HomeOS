@@ -98,6 +98,16 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("DELETE /api/v1/drive/trash/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		if err := files.DeleteForever(r.PathValue("id")); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /api/v1/drive/folders", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, true) {
 			return

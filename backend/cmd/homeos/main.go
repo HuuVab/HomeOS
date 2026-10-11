@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/api"
@@ -93,6 +94,27 @@ func main() {
 		log.Fatal("initialize HomeDrive: ", err)
 	}
 	defer files.Close()
+	retentionDays := 30
+	if configured := os.Getenv("HOMEOS_TRASH_RETENTION_DAYS"); configured != "" {
+		retentionDays, err = strconv.Atoi(configured)
+		if err != nil || retentionDays < 1 {
+			log.Fatal("HOMEOS_TRASH_RETENTION_DAYS must be a positive integer")
+		}
+	}
+	retention := time.Duration(retentionDays) * 24 * time.Hour
+	cleanup := func() {
+		if _, err := files.PurgeExpired(retention, time.Now()); err != nil {
+			log.Printf("HomeDrive trash cleanup: %v", err)
+		}
+	}
+	cleanup()
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			cleanup()
+		}
+	}()
 
 	server := &http.Server{
 		Addr:              addr,

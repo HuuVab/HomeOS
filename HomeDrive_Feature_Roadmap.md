@@ -35,8 +35,8 @@
 - [ ] **P1** Keyboard shortcuts
 - [ ] **P1** Breadcrumb navigation
 - [ ] **P1** File version history and restore
-- [ ] **P1** Recycle bin, restore, and permanent deletion (trash and restore implemented; permanent deletion pending)
-- [ ] **P1** Automatically delete Trash items after a configurable retention period (for example, 30 days)
+- [x] **P1** Recycle bin, restore, and permanent deletion
+- [x] **P1** Automatically delete Trash items after a configurable retention period (default 30 days)
 - [ ] **P1** Duplicate file handling
 - [ ] **P1** File shortcuts (references without duplicating content)
 - [ ] **P2** Custom tags and labels

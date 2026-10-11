@@ -4,7 +4,7 @@ type Entry = { name: string; path: string; kind: 'file' | 'folder'; size: number
 
 type Props = { csrfToken: string }
 type UploadSession = { id: string; offset: number; size: number }
-type TrashEntry = { id: string; path: string }
+type TrashEntry = { id: string; path: string; deletedAt: string }
 const chunkSize = 4 * 1024 * 1024
 
 async function fingerprint(file: File): Promise<string> {
@@ -93,6 +93,17 @@ export default function Drive({ csrfToken }: Props) {
     finally { setBusy(false) }
   }
 
+  async function deleteForever(entry: TrashEntry) {
+    if (!window.confirm(`Permanently delete /${entry.path}? This cannot be undone.`)) return
+    setBusy(true)
+    try {
+      const response = await fetch(`/api/v1/drive/trash/${entry.id}`, { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken } })
+      if (!response.ok) throw new Error('Could not permanently delete item')
+      await loadTrash()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not permanently delete item') }
+    finally { setBusy(false) }
+  }
+
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
@@ -167,7 +178,7 @@ export default function Drive({ csrfToken }: Props) {
     <p className="drive-note">No fixed per-file cap. Uploads resume after interruption when you select the same file again; unfinished files stay hidden until complete.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
     <button type="button" className="secondary-button" onClick={() => setShowTrash(!showTrash)}>{showTrash ? 'Show files' : 'Trash'}</button>
-    {showTrash ? <ul className="drive-list">{trashEntries.map((entry) => <li key={entry.id}><span>/{entry.path}</span><button type="button" disabled={busy} onClick={() => void restoreEntry(entry)}>Restore</button></li>)}{trashEntries.length === 0 && <li>Trash is empty.</li>}</ul> : <>
+    {showTrash ? <><p className="drive-note">Items are automatically deleted after 30 days unless the server retention setting is changed.</p><ul className="drive-list">{trashEntries.map((entry) => <li key={entry.id}><span>/{entry.path}</span><button type="button" disabled={busy} onClick={() => void restoreEntry(entry)}>Restore</button><button type="button" disabled={busy} onClick={() => void deleteForever(entry)}>Delete forever</button></li>)}{trashEntries.length === 0 && <li>Trash is empty.</li>}</ul></> : <>
     <div className="drive-actions">
       <div><label htmlFor="drive-search">Find in this folder</label><input id="drive-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search filenames" /></div>
       <div><label htmlFor="drive-sort">Sort by</label><div className="drive-action-row"><select id="drive-sort" value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)}><option value="name">Name</option><option value="date">Modified date</option><option value="size">Size</option><option value="type">Type</option></select><button type="button" className="secondary-button" onClick={() => setDescending(!descending)} aria-label={descending ? 'Sort ascending' : 'Sort descending'}>{descending ? 'Descending' : 'Ascending'}</button></div></div>
