@@ -212,3 +212,45 @@ func TestReconciliationProducesIncrementalChanges(t *testing.T) {
 		t.Fatalf("cursor page = %+v, %v", page, err)
 	}
 }
+
+func TestFileMetadataReadsUseCommittedRows(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "metadata.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.CreateAdmin("admin_test", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Unix(100, 0)
+	entries := []drive.Entry{
+		{Name: "docs", Path: "docs", Kind: "folder", ModifiedAt: stamp},
+		{Name: "note.txt", Path: "docs/note.txt", Kind: "file", Size: 4, ModifiedAt: stamp},
+		{Name: "root.txt", Path: "root.txt", Kind: "file", Size: 2, ModifiedAt: stamp},
+	}
+	if err := db.ReplaceFileEntries(1, entries); err != nil {
+		t.Fatal(err)
+	}
+	root, err := db.FileEntries(1, "")
+	if err != nil || len(root) != 2 {
+		t.Fatalf("root = %+v, %v", root, err)
+	}
+	children, err := db.FileEntries(1, "docs")
+	if err != nil || len(children) != 1 || children[0].Path != "docs/note.txt" {
+		t.Fatalf("children = %+v, %v", children, err)
+	}
+	if _, err := db.FileEntries(1, "root.txt"); !errors.Is(err, drive.ErrInvalidPath) {
+		t.Fatalf("file as folder = %v", err)
+	}
+	if _, err := db.FileEntries(1, "missing"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing folder = %v", err)
+	}
+	results, err := db.SearchFileEntries(1, "NOTE")
+	if err != nil || len(results) != 1 || results[0].Path != "docs/note.txt" {
+		t.Fatalf("search = %+v, %v", results, err)
+	}
+	other, err := db.FileEntries(2, "")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other owner = %+v, %v", other, err)
+	}
+}
