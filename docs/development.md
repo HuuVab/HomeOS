@@ -6,7 +6,7 @@ This development build includes a loopback-only Go API, PostgreSQL-capable metad
 
 - Go 1.27 or newer
 - Node.js 22.12 or newer and npm
-- PostgreSQL 18 when testing the server deployment path
+- PostgreSQL 17 or newer when testing the server deployment path
 
 ## Run
 
@@ -65,7 +65,7 @@ cd ..\frontend
 npm run build
 ```
 
-To exercise the PostgreSQL metadata path, set `HOMEOS_TEST_POSTGRES_URL` to a disposable PostgreSQL database URL and run `go test ./internal/store -run TestPostgresMetadataIntegration -v` from `backend`. The test creates and drops an isolated random schema; it skips when the variable is unset. PostgreSQL-backed HomeDrive serves metadata reads from the database, while standalone SQLite keeps filesystem-backed reads.
+To exercise the PostgreSQL metadata path, set `HOMEOS_TEST_POSTGRES_URL` to a disposable PostgreSQL database URL and run `go test ./internal/store -run TestPostgresMetadataIntegration -v` from `backend`. The test creates and drops an isolated random schema; it skips when the variable is unset. It passed against a local PostgreSQL 17 instance on 2026-10-11. PostgreSQL-backed HomeDrive serves metadata reads from the database, while standalone SQLite keeps filesystem-backed reads.
 
 Do not point a fresh PostgreSQL database at an existing SQLite-mode HomeDrive file directory expecting automatic import. PostgreSQL mode treats its catalog as authoritative for listings and rejects filesystem/catalog drift on writes. To import one existing owner's files into an **empty** PostgreSQL catalog, stop the HomeOS server, back up the old database and file directory, set `HOMEOS_DATABASE_URL` and the same `HOMEOS_DATA_DIR` used by the files, then run `go run ./cmd/homeos drive-import <owner-id>` to inspect the dry-run counts. Re-run with `--apply` only after checking them. The command refuses owners that already have file, Trash, upload, or pending reconciliation records; it does not repair or overwrite a populated catalog. Start the server after import. PostgreSQL itself can run locally or remotely; Docker is optional.
 
