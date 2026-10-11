@@ -153,6 +153,9 @@ func TestFileMutationMarkerSurvivesRestart(t *testing.T) {
 	if err := db.BeginFileMutation(1); err != nil {
 		t.Fatal(err)
 	}
+	if pending, err := db.HasPendingFileMutation(1); err != nil || !pending {
+		t.Fatalf("marker not visible: %v, %v", pending, err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +177,9 @@ func TestFileMutationMarkerSurvivesRestart(t *testing.T) {
 	}
 	if err := db.ReconcileFileMutation(1, nil); err != nil {
 		t.Fatal(err)
+	}
+	if pending, err := db.HasPendingFileMutation(1); err != nil || pending {
+		t.Fatalf("marker not cleared: %v, %v", pending, err)
 	}
 	owners, err = db.PendingFileMutations()
 	if err != nil || len(owners) != 0 {

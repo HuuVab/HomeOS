@@ -43,6 +43,26 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			writeError(w, http.StatusInternalServerError, "storage_error", "Storage unavailable")
 			return
 		}
+		if db.AuthoritativeMetadata() {
+			pending, err := db.HasPendingFileMutation(user.ID)
+			if err == nil && pending {
+				mutationMu.Lock()
+				pending, err = db.HasPendingFileMutation(user.ID)
+				if err == nil && pending {
+					var entries []drive.Entry
+					entries, err = userFiles.AllEntries()
+					if err == nil {
+						err = db.ReconcileFileMutation(user.ID, entries)
+					}
+				}
+				mutationMu.Unlock()
+			}
+			if err != nil {
+				log.Printf("HomeDrive pending metadata recovery for user %d: %v", user.ID, err)
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata recovery is pending")
+				return
+			}
+		}
 		driveMux := http.NewServeMux()
 		registerDriveRoutes(driveMux, db, userFiles, user.ID)
 		metadataChanged := r.Method == http.MethodPut || r.Method == http.MethodDelete ||
