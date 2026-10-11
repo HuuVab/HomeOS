@@ -224,6 +224,13 @@ func (s *Store) ReplaceFileEntries(ownerID int64, entries []drive.Entry) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := s.replaceFileEntriesTx(tx, ownerID, entries); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) replaceFileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.Entry) error {
 	if _, err := tx.Exec(s.query(`DELETE FROM file_entries WHERE owner_id = ?`), ownerID); err != nil {
 		return err
 	}
@@ -232,7 +239,49 @@ func (s *Store) ReplaceFileEntries(ownerID int64, entries []drive.Entry) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// BeginFileMutation durably marks an owner for filesystem-to-metadata reconciliation.
+// A crash after this point leaves a marker that can be replayed on startup.
+func (s *Store) BeginFileMutation(ownerID int64) error {
+	_, err := s.db.Exec(s.query(`INSERT INTO metadata_reconcile (owner_id, started_at) VALUES (?, ?)
+		ON CONFLICT (owner_id) DO UPDATE SET started_at = EXCLUDED.started_at`), ownerID, time.Now().Unix())
+	return err
+}
+
+// ReconcileFileMutation atomically publishes the filesystem snapshot and clears
+// its recovery marker. On error the marker remains for a later retry.
+func (s *Store) ReconcileFileMutation(ownerID int64, entries []drive.Entry) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.replaceFileEntriesTx(tx, ownerID, entries); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(s.query(`DELETE FROM metadata_reconcile WHERE owner_id = ?`), ownerID); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func (s *Store) PendingFileMutations() ([]int64, error) {
+	rows, err := s.db.Query(`SELECT owner_id FROM metadata_reconcile ORDER BY owner_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var owners []int64
+	for rows.Next() {
+		var ownerID int64
+		if err := rows.Scan(&ownerID); err != nil {
+			return nil, err
+		}
+		owners = append(owners, ownerID)
+	}
+	return owners, rows.Err()
 }
 
 func (s *Store) ResetAdminPassword(username, passwordHash string) error {

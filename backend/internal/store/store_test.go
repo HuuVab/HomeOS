@@ -139,3 +139,36 @@ func TestMultiuserMigrationPreservesSessions(t *testing.T) {
 		t.Fatalf("session after migration: %+v %v", user, err)
 	}
 }
+
+func TestFileMutationMarkerSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reconcile.sqlite")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateAdmin("admin_test", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BeginFileMutation(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	owners, err := db.PendingFileMutations()
+	if err != nil || len(owners) != 1 || owners[0] != 1 {
+		t.Fatalf("pending owners = %v, %v", owners, err)
+	}
+	if err := db.ReconcileFileMutation(1, nil); err != nil {
+		t.Fatal(err)
+	}
+	owners, err = db.PendingFileMutations()
+	if err != nil || len(owners) != 0 {
+		t.Fatalf("remaining owners = %v, %v", owners, err)
+	}
+}
