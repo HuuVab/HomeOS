@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,25 @@ import (
 
 	"github.com/HuuVab/HomeOS/backend/internal/auth"
 )
+
+func TestMigrationFailureIsExplicit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "broken.sqlite")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE sessions (wrong_column TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := Open(path)
+	if err == nil {
+		opened.Close()
+		t.Fatal("expected migration failure for incompatible schema")
+	}
+}
 
 func TestAdminPersistsAndResetRevokesSessions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "homeos.sqlite")

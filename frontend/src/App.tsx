@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import Drive from './Drive'
 
 type Session = {
   user: { id: number; username: string; displayName: string; role: string }
@@ -204,6 +205,8 @@ export default function App() {
         })}
         {!data && <p className="empty">{loading ? 'Loading measurements…' : 'No measurements available.'}</p>}
       </section>
+
+      <Drive csrfToken={session.csrfToken} />
 
       <footer>
         <span>Automatic refresh every second</span>

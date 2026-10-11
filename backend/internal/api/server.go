@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/HuuVab/HomeOS/backend/internal/drive"
 	"github.com/HuuVab/HomeOS/backend/internal/monitor"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
@@ -24,9 +25,10 @@ type statusResponse struct {
 	Metrics   []metric  `json:"metrics"`
 }
 
-func NewHandler(webDir string, db *store.Store, collector monitor.Collector) http.Handler {
+func NewHandler(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store) http.Handler {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, db)
+	registerDriveRoutes(mux, db, files)
 	mux.HandleFunc("GET /api/v1/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "alive"})
 	})

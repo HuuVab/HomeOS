@@ -25,7 +25,7 @@ cd backend
 go run ./cmd/homeos backup 'D:\Backups\homeos-2026-10-10.sqlite'
 ```
 
-The command refuses to overwrite an existing file and runs SQLite's integrity check on the backup. Keep a copy on another device, and protect it like the live database: it contains account and session data. The command backs up SQLite only; future HomeDrive files will need separate backup coverage.
+The command refuses to overwrite an existing file and runs SQLite's integrity check on the backup. Keep a copy on another device, and protect it like the live database: it contains account and session data. The command backs up SQLite only. HomeDrive files in `backend/data/files` or the Docker `/data/files` volume need a separate filesystem backup; see [HomeDrive v0.2](v0.2-homedrive.md).
 
 ## Back up the Docker database
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/HuuVab/HomeOS/backend/internal/api"
 	"github.com/HuuVab/HomeOS/backend/internal/auth"
+	"github.com/HuuVab/HomeOS/backend/internal/drive"
 	"github.com/HuuVab/HomeOS/backend/internal/monitor"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 	"golang.org/x/term"
@@ -87,10 +88,15 @@ func main() {
 		port = configuredPort
 	}
 	addr := net.JoinHostPort(bindAddress, port)
+	files, err := drive.New(filepath.Join(dataDir, "files"))
+	if err != nil {
+		log.Fatal("initialize HomeDrive: ", err)
+	}
+	defer files.Close()
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           api.NewHandler(os.Getenv("HOMEOS_WEB_DIR"), db, monitor.NewCollector(dataDir)),
+		Handler:           api.NewHandler(os.Getenv("HOMEOS_WEB_DIR"), db, monitor.NewCollector(dataDir), files),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("HomeOS listening on http://%s", addr)

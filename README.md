@@ -12,7 +12,7 @@ The proposed foundation is:
 
 ## Project status
 
-HomeOS is in early v0.1 development. It currently has a loopback-only Go API, SQLite-backed administrator authentication, a React dashboard with native Windows host metrics, and Docker Compose packaging. Broader monitoring and production hardening are still to come.
+HomeOS has a loopback-only Go API, SQLite-backed administrator authentication, a React dashboard with native Windows host metrics, and Docker Compose packaging. The first HomeDrive v0.2 slice adds authenticated file listing, folders, uploads, and downloads. Broader monitoring and production hardening are still to come. The Docker image has not been run on the target Windows machine because WSL 2 is not installed.
 
 The first milestone (`v0.1`) will focus on HomeCore, authentication, the dashboard, and basic monitoring. See the [project concept and technical design report](HomeOS_Project_Report.md) for the full scope, architecture, roadmap, and risks.
 
@@ -21,6 +21,8 @@ The [v0.1 requirements and acceptance checklist](docs/v0.1-requirements.md) defi
 The [local development guide](docs/development.md) shows how to run the first working API and dashboard slice.
 
 The [deployment and backup guide](docs/deployment.md) describes Docker packaging and SQLite backup/restore.
+
+The [HomeDrive v0.2 guide](docs/v0.2-homedrive.md) documents its storage boundaries, API, limits, and separate file-backup requirement.
 
 ## Planned repository layout
 

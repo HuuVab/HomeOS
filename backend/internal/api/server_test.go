@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/auth"
+	"github.com/HuuVab/HomeOS/backend/internal/drive"
 	"github.com/HuuVab/HomeOS/backend/internal/monitor"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
@@ -29,7 +30,12 @@ func testHandler(t *testing.T) (http.Handler, *store.Store) {
 	if err := db.CreateAdmin("test_admin", hash); err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler("", db, testCollector{}), db
+	files, err := drive.New(filepath.Join(t.TempDir(), "files"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { files.Close() })
+	return NewHandler("", db, testCollector{}, files), db
 }
 
 type testCollector struct{}
