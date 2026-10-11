@@ -366,6 +366,12 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			driveError(w, err)
 			return
 		}
+		if db.AuthoritativeMetadata() {
+			if err := db.UpsertUploadSession(ownerID, session); err != nil {
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "Upload session metadata is unavailable; retry to resume")
+				return
+			}
+		}
 		writeJSON(w, http.StatusOK, session)
 	})
 	mux.HandleFunc("PATCH /api/v1/drive/uploads/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -377,16 +383,34 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_offset", "Expected a non-negative upload offset")
 			return
 		}
+		if db.AuthoritativeMetadata() {
+			if _, err := db.PendingUploadSession(ownerID, r.PathValue("id")); err != nil {
+				driveError(w, err)
+				return
+			}
+		}
 		newOffset, err := files.AppendChunk(r.PathValue("id"), offset, r.Body)
 		if err != nil {
 			driveError(w, err)
 			return
+		}
+		if db.AuthoritativeMetadata() {
+			if err := db.SetUploadOffset(ownerID, r.PathValue("id"), newOffset); err != nil {
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "Upload offset metadata is unavailable; retry to resume")
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]int64{"offset": newOffset})
 	})
 	mux.HandleFunc("POST /api/v1/drive/uploads/{id}/complete", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, true) {
 			return
+		}
+		if db.AuthoritativeMetadata() {
+			if _, err := db.PendingUploadSession(ownerID, r.PathValue("id")); err != nil {
+				driveError(w, err)
+				return
+			}
 		}
 		if err := files.FinishUpload(r.PathValue("id")); err != nil {
 			driveError(w, err)
