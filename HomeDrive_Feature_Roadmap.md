@@ -142,7 +142,7 @@
 - [ ] **P1** Conflict detection and resolution
 - [ ] **P1** Deletion propagation with recovery
 - [ ] **P1** Offline file access
-- [ ] **P1** Change feed API with cursors for incremental sync
+- [x] **P1** Change feed API with cursors for incremental sync (metadata create/update/delete events; no desktop client yet)
 - [ ] **P1** Revision IDs for conflict-safe updates
 - [ ] **P2** Windows Explorer integration
 - [ ] **P2** macOS Finder and Linux integration
