@@ -30,3 +30,9 @@
 6. Introduce event messaging and observability only when needed.
 
 **Design rule:** One source of truth per kind of data; introduce each technology for a clear responsibility rather than complexity alone.
+
+## Current implementation status
+
+HomeDrive now writes a durable per-user reconciliation marker before a file-mutating HTTP request. It buffers the response until the filesystem snapshot and metadata rows commit together in the database; if that commit fails, the API returns 503 and retains the marker. On restart, the server replays pending markers before accepting traffic. This prevents a successful response from hiding a metadata-sync failure and makes an interrupted update recoverable.
+
+This is an intermediate consistency layer, **not** an atomic filesystem-and-database transaction or full PostgreSQL metadata authority. File listing and operations still read the filesystem, and the metadata table is rebuilt from it. Moving to PostgreSQL-authoritative records, revisions, and the change feed remains the next architectural step. PostgreSQL integration testing is also still needed.
