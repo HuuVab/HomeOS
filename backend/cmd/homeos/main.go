@@ -149,7 +149,15 @@ func main() {
 		}
 		entries, err := userFiles.AllEntries()
 		if err == nil {
-			err = db.ReconcileFileMutation(ownerID, entries)
+			if db.AuthoritativeMetadata() {
+				var trash []drive.TrashEntry
+				trash, err = userFiles.ListTrash()
+				if err == nil {
+					err = db.ReconcileDriveMutation(ownerID, entries, trash)
+				}
+			} else {
+				err = db.ReconcileFileMutation(ownerID, entries)
+			}
 		}
 		if err != nil {
 			log.Fatalf("recover HomeDrive metadata for user %d: %v", ownerID, err)
