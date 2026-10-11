@@ -180,3 +180,35 @@ func TestFileMutationMarkerSurvivesRestart(t *testing.T) {
 		t.Fatalf("remaining owners = %v, %v", owners, err)
 	}
 }
+
+func TestReconciliationProducesIncrementalChanges(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "changes.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.CreateAdmin("admin_test", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Unix(100, 0)
+	entry := drive.Entry{Name: "note.txt", Path: "note.txt", Kind: "file", Size: 1, ModifiedAt: stamp}
+	for _, snapshot := range [][]drive.Entry{{entry}, {entry}, {{Name: "note.txt", Path: "note.txt", Kind: "file", Size: 2, ModifiedAt: stamp.Add(time.Second)}}, {}} {
+		if err := db.BeginFileMutation(1); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.ReconcileFileMutation(1, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err := db.ChangesAfter(1, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 || events[0].Operation != "create" || *events[0].Version != 1 || events[1].Operation != "update" || *events[1].Version != 2 || events[2].Operation != "delete" || events[2].Version != nil {
+		t.Fatalf("unexpected change feed: %+v", events)
+	}
+	page, err := db.ChangesAfter(1, events[0].ID, 1)
+	if err != nil || len(page) != 1 || page[0].ID != events[1].ID {
+		t.Fatalf("cursor page = %+v, %v", page, err)
+	}
+}

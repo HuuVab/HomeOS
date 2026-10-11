@@ -224,22 +224,10 @@ func (s *Store) ReplaceFileEntries(ownerID int64, entries []drive.Entry) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := s.replaceFileEntriesTx(tx, ownerID, entries); err != nil {
+	if err := s.reconcileEntriesTx(tx, ownerID, entries, false); err != nil {
 		return err
 	}
 	return tx.Commit()
-}
-
-func (s *Store) replaceFileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.Entry) error {
-	if _, err := tx.Exec(s.query(`DELETE FROM file_entries WHERE owner_id = ?`), ownerID); err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if _, err := tx.Exec(s.query(`INSERT INTO file_entries (owner_id, path, kind, size, modified_at) VALUES (?, ?, ?, ?, ?)`), ownerID, entry.Path, entry.Kind, entry.Size, entry.ModifiedAt.Unix()); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // BeginFileMutation durably marks an owner for filesystem-to-metadata reconciliation.
@@ -258,7 +246,7 @@ func (s *Store) ReconcileFileMutation(ownerID int64, entries []drive.Entry) erro
 		return err
 	}
 	defer tx.Rollback()
-	if err := s.replaceFileEntriesTx(tx, ownerID, entries); err != nil {
+	if err := s.reconcileEntriesTx(tx, ownerID, entries, true); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(s.query(`DELETE FROM metadata_reconcile WHERE owner_id = ?`), ownerID); err != nil {
