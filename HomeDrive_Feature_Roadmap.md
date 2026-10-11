@@ -16,7 +16,7 @@
 
 - [x] **P0** Upload single files
 - [x] **P0** Upload multiple files
-- [ ] **P0** Drag-and-drop uploads
+- [x] **P0** Drag-and-drop uploads
 - [x] **P0** Create folders and nested folders
 - [x] **P0** Rename files and folders
 - [x] **P0** Move files and folders
@@ -24,10 +24,10 @@
 - [x] **P0** Delete files and folders
 - [x] **P0** Download files
 - [x] **P0** Download folders as ZIP
-- [ ] **P0** File list and grid views
+- [x] **P0** File list and grid views
 - [x] **P0** Sort by name, date, size, and type
 - [x] **P0** File details and metadata
-- [ ] **P1** Bulk selection and operations
+- [x] **P1** Bulk selection and operations (checkbox selection; move, copy, and Trash)
 - [ ] **P1** Cut, copy, and paste
 - [ ] **P1** Starred/favorite files
 - [ ] **P1** Recent files
@@ -68,7 +68,7 @@
 - [x] **P0** PDF previews
 - [ ] **P1** Video streaming with seeking
 - [ ] **P1** Audio playback
-- [ ] **P1** Plain-text, Markdown, and code previews
+- [x] **P1** Plain-text, Markdown, and code previews (bounded to 1 MiB)
 - [ ] **P1** Syntax highlighting
 - [ ] **P1** DOCX, XLSX, and PPTX previews
 - [ ] **P1** Thumbnail generation
@@ -205,17 +205,17 @@
 
 - [x] **P0** Responsive web dashboard
 - [x] **P0** Sidebar navigation
-- [ ] **P0** File table and context menus
-- [ ] **P0** Upload drop zone
+- [x] **P0** File table and action menus
+- [x] **P0** Upload drop zone
 - [x] **P0** Loading, error, and empty states
 - [ ] **P1** Dark/light theme
-- [ ] **P1** Grid/list toggle
+- [x] **P1** Grid/list toggle
 - [ ] **P1** Right-click actions
 - [ ] **P1** Keyboard navigation and shortcuts
 - [ ] **P1** Toast notifications
 - [ ] **P1** Multi-select with Shift/Ctrl
-- [ ] **P1** Storage usage indicator
-- [ ] **P1** File details side panel
+- [x] **P1** Storage usage indicator
+- [x] **P1** File details side panel
 - [ ] **P1** Mobile browser support
 - [ ] **P2** Customizable dashboard
 - [ ] **P2** Multilingual UI
