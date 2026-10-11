@@ -1,10 +1,35 @@
 services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: homeos
+      POSTGRES_USER: homeos
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - homeos-postgres:/var/lib/postgresql/data
+    secrets:
+      - postgres_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homeos -d homeos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   homeos:
     build: .
     ports:
       - "127.0.0.1:8081:8080"
     volumes:
       - homeos-data:/data
+    environment:
+      HOMEOS_DATABASE_URL: postgres://homeos@postgres/homeos?sslmode=disable
+      HOMEOS_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp
@@ -21,3 +46,8 @@ services:
 
 volumes:
   homeos-data:
+  homeos-postgres:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt

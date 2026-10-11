@@ -6,13 +6,13 @@ The proposed foundation is:
 
 - Go modular-monolith backend
 - React and TypeScript frontend
-- SQLite metadata storage
+- PostgreSQL authoritative server metadata (SQLite is available for standalone development)
 - Shared filesystem storage
 - Docker Compose deployment
 
 ## Project status
 
-HomeOS has a loopback-only Go API, SQLite-backed administrator authentication, a React dashboard with native Windows host metrics, and Docker Compose packaging. The first HomeDrive v0.2 slice adds authenticated file listing, folders, uploads, and downloads. Broader monitoring and production hardening are still to come. The Docker image has not been run on the target Windows machine because WSL 2 is not installed.
+HomeOS has a loopback-only Go API, PostgreSQL-backed server metadata, a React dashboard with native Windows host metrics, and Docker Compose packaging. SQLite remains an explicit standalone-development option, not a second server source of truth. The first HomeDrive v0.2 slice adds authenticated file listing, folders, uploads, and downloads. The metadata schema now reserves durable records for versions, shares, resumable upload sessions, and an incremental change feed; service APIs for those records remain upcoming work. Broader monitoring and production hardening are still to come. The Docker image has not been run on the target Windows machine because WSL 2 is not installed.
 
 The first milestone (`v0.1`) will focus on HomeCore, authentication, the dashboard, and basic monitoring. See the [project concept and technical design report](HomeOS_Project_Report.md) for the full scope, architecture, roadmap, and risks.
 
@@ -23,6 +23,8 @@ The [local development guide](docs/development.md) shows how to run the first wo
 The [deployment and backup guide](docs/deployment.md) describes Docker packaging and SQLite backup/restore.
 
 The [HomeDrive v0.2 guide](docs/v0.2-homedrive.md) documents its storage boundaries, API, large-file behavior, and separate file-backup requirement. The web app has a service sidebar; unfinished modules are explicitly marked as planned.
+
+The [HomeDrive architecture addendum](HomeDrive_Architecture_Addendum.md) records the additive PostgreSQL, SQLite sync-client, Redis, and gRPC decisions. PostgreSQL support and the expanded metadata schema are the first implemented increment; gRPC, Redis, desktop sync, messaging, and observability remain staged work.
 
 ## Planned repository layout
 

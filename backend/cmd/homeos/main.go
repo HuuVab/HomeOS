@@ -5,10 +5,12 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/api"
@@ -27,12 +29,35 @@ func main() {
 		dataDir = "data"
 	}
 	dbPath := filepath.Join(dataDir, "homeos.sqlite")
+	databaseURL := os.Getenv("HOMEOS_DATABASE_URL")
+	if passwordFile := os.Getenv("HOMEOS_DATABASE_PASSWORD_FILE"); databaseURL != "" && passwordFile != "" {
+		password, readErr := os.ReadFile(passwordFile)
+		if readErr != nil {
+			log.Fatal("read database password: ", readErr)
+		}
+		parsed, parseErr := url.Parse(databaseURL)
+		if parseErr != nil || parsed.User == nil {
+			log.Fatal("HOMEOS_DATABASE_URL must include a database username")
+		}
+		parsed.User = url.UserPassword(parsed.User.Username(), strings.TrimSpace(string(password)))
+		databaseURL = parsed.String()
+	}
 	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if databaseURL != "" {
+			log.Fatal("the backup command is SQLite-only; use pg_dump for PostgreSQL")
+		}
 		if _, err := os.Stat(dbPath); err != nil {
 			log.Fatal("live database does not exist: ", err)
 		}
 	}
-	db, err := store.Open(dbPath)
+	var db *store.Store
+	var err error
+	if databaseURL != "" {
+		db, err = store.OpenPostgres(databaseURL)
+	} else {
+		log.Print("HOMEOS_DATABASE_URL is not set; using SQLite standalone mode")
+		db, err = store.Open(dbPath)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}

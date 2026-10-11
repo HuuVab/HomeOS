@@ -1,11 +1,12 @@
 # Local development
 
-This v0.1 development build includes a loopback-only Go API, SQLite-backed administrator authentication, and a React dashboard with application-scoped status samples. Do not expose this development build on a LAN or the Internet.
+This development build includes a loopback-only Go API, PostgreSQL-capable metadata storage, and a React dashboard with application-scoped status samples. Do not expose this development build on a LAN or the Internet.
 
 ## Prerequisites
 
 - Go 1.27 or newer
 - Node.js 22.12 or newer and npm
+- PostgreSQL 18 when testing the server deployment path
 
 ## Run
 
@@ -16,7 +17,13 @@ cd backend
 go run ./cmd/homeos create-admin <username>
 ```
 
-The SQLite database is created at `backend/data/homeos.sqlite` by default. This directory is ignored by Git. Do not commit database files or backups.
+With no database environment variables, the app uses standalone SQLite at `backend/data/homeos.sqlite`. This mode exists for local evaluation and future offline-client work; deployed servers should set PostgreSQL as the sole metadata authority:
+
+```powershell
+$env:HOMEOS_DATABASE_URL = 'postgres://homeos:your-password@127.0.0.1:5432/homeos?sslmode=disable'
+```
+
+Alternatively set `HOMEOS_DATABASE_PASSWORD_FILE` and omit the password from the URL. The file is read at startup and its trimmed contents are injected into the connection URL. Database migrations run automatically. Do not commit database files, credentials, or backups.
 
 If administrator access is lost, run `go run ./cmd/homeos reset-admin-password <username>` locally. It prompts for a new password and revokes existing sessions.
 
@@ -60,4 +67,4 @@ npm run build
 
 On native Windows, the status endpoint reports host CPU usage, physical memory usage, and usage of the disk containing the HomeOS data directory. It also reports application uptime and Go heap allocation. The dashboard labels every sample by scope. On other platforms, host metrics are marked unavailable until a platform-specific collector is implemented; the app does not present container metrics as host metrics.
 
-Sessions expire after 24 hours. Login attempts are limited to 10 per source IP per minute. Passwords use Argon2id with 19 MiB of memory, two iterations, one thread, and a unique random salt. Session cookies are `HttpOnly` and `SameSite=Strict`; they are marked `Secure` when the Go server handles HTTPS directly. The database file and its `-wal`/`-shm` companions must be backed up together using a SQLite-aware backup procedure while the app is running, or after stopping the app.
+Sessions expire after 24 hours. Login attempts are limited to 10 per source IP per minute. Passwords use Argon2id with 19 MiB of memory, two iterations, one thread, and a unique random salt. Session cookies are `HttpOnly` and `SameSite=Strict`; they are marked `Secure` when the Go server handles HTTPS directly. Use `pg_dump` for PostgreSQL. In standalone SQLite mode, back up the database and its `-wal`/`-shm` companions with a SQLite-aware procedure while the app is running, or after stopping the app.
