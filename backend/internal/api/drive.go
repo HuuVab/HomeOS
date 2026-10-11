@@ -16,6 +16,42 @@ import (
 )
 
 func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64) {
+	checkSource := func(w http.ResponseWriter, name string) bool {
+		if !db.AuthoritativeMetadata() {
+			return true
+		}
+		_, err := db.FileEntry(ownerID, name)
+		if err != nil {
+			driveError(w, err)
+			return false
+		}
+		return true
+	}
+	checkTarget := func(w http.ResponseWriter, name string) bool {
+		if !db.AuthoritativeMetadata() {
+			return true
+		}
+		if _, err := db.FileEntry(ownerID, name); err == nil {
+			driveError(w, os.ErrExist)
+			return false
+		} else if !errors.Is(err, os.ErrNotExist) {
+			driveError(w, err)
+			return false
+		}
+		parent := path.Dir(name)
+		if parent != "." {
+			entry, err := db.FileEntry(ownerID, parent)
+			if err != nil {
+				driveError(w, err)
+				return false
+			}
+			if entry.Kind != "folder" {
+				driveError(w, drive.ErrInvalidPath)
+				return false
+			}
+		}
+		return true
+	}
 	check := func(w http.ResponseWriter, r *http.Request, mutate bool) bool {
 		_, csrf, _, ok := authenticate(w, r, db)
 		if !ok {
@@ -142,6 +178,9 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected source and destination paths")
 			return
 		}
+		if !checkSource(w, payload.From) || !checkTarget(w, payload.To) {
+			return
+		}
 		if err := files.Move(payload.From, payload.To); err != nil {
 			driveError(w, err)
 			return
@@ -160,6 +199,9 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		decoder.DisallowUnknownFields()
 		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected source and destination paths")
+			return
+		}
+		if !checkSource(w, payload.From) || !checkTarget(w, payload.To) {
 			return
 		}
 		if err := files.Copy(payload.From, payload.To); err != nil {
@@ -205,6 +247,9 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		decoder.DisallowUnknownFields()
 		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected path")
+			return
+		}
+		if !checkSource(w, payload.Path) {
 			return
 		}
 		if err := files.Trash(payload.Path); err != nil {
@@ -257,6 +302,9 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected a folder path")
 			return
 		}
+		if !checkTarget(w, payload.Path) {
+			return
+		}
 		if err := files.CreateFolder(payload.Path); err != nil {
 			driveError(w, err)
 			return
@@ -267,7 +315,11 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		if !check(w, r, true) {
 			return
 		}
-		if err := files.Upload(r.URL.Query().Get("path"), r.Body); err != nil {
+		name := r.URL.Query().Get("path")
+		if !checkTarget(w, name) {
+			return
+		}
+		if err := files.Upload(name, r.Body); err != nil {
 			driveError(w, err)
 			return
 		}
@@ -286,6 +338,9 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		decoder.DisallowUnknownFields()
 		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected upload path, size, and fingerprint")
+			return
+		}
+		if !checkTarget(w, payload.Path) {
 			return
 		}
 		session, err := files.StartUpload(payload.Path, payload.Size, payload.Fingerprint)
