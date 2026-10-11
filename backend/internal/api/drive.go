@@ -58,6 +58,37 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /api/v1/drive/copy", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Expected source and destination paths")
+			return
+		}
+		if err := files.Copy(payload.From, payload.To); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux.HandleFunc("GET /api/v1/drive/folders/zip", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, false) {
+			return
+		}
+		folder := r.URL.Query().Get("path")
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(folder) + ".zip"}))
+		if err := files.WriteZip(folder, w); err != nil {
+			driveError(w, err)
+		}
+	})
 	mux.HandleFunc("POST /api/v1/drive/trash", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, true) {
 			return

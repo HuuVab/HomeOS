@@ -22,7 +22,7 @@ export default function Drive({ csrfToken }: Props) {
   const [folder, setFolder] = useState('')
   const [entries, setEntries] = useState<Entry[]>([])
   const [name, setName] = useState('')
-  const [upload, setUpload] = useState<File | null>(null)
+  const [uploads, setUploads] = useState<File[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -64,14 +64,14 @@ export default function Drive({ csrfToken }: Props) {
 
   useEffect(() => { if (showTrash) void loadTrash().catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to load Trash')) }, [showTrash, loadTrash])
 
-  async function changeEntry(entry: Entry, action: 'rename' | 'move' | 'trash') {
+  async function changeEntry(entry: Entry, action: 'rename' | 'move' | 'copy' | 'trash') {
     let endpoint = '/api/v1/drive/trash'
     let payload: object = { path: entry.path }
     if (action !== 'trash') {
-      const proposed = window.prompt(action === 'rename' ? 'New name' : 'Destination path from drive root', action === 'rename' ? entry.name : entry.path)
+      const proposed = window.prompt(action === 'rename' ? 'New name' : 'Destination path from drive root', action === 'rename' ? entry.name : action === 'copy' ? `${entry.path}-copy` : entry.path)
       if (proposed === null) return
       const to = action === 'rename' ? [...entry.path.split('/').slice(0, -1), proposed].filter(Boolean).join('/') : proposed
-      endpoint = '/api/v1/drive/move'
+      endpoint = action === 'copy' ? '/api/v1/drive/copy' : '/api/v1/drive/move'
       payload = { from: entry.path, to }
     } else if (!window.confirm(`Move ${entry.name} to Trash?`)) return
     setBusy(true)
@@ -128,11 +128,12 @@ export default function Drive({ csrfToken }: Props) {
   }
 
   async function uploadFile() {
-    if (!upload) return
+    if (uploads.length === 0) return
     setBusy(true)
     setError(null)
     setProgress(0)
     try {
+      for (const upload of uploads) {
       const path = folder ? `${folder}/${upload.name}` : upload.name
       const response = await fetch('/api/v1/drive/uploads', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
@@ -155,7 +156,8 @@ export default function Drive({ csrfToken }: Props) {
       }
       const complete = await fetch(`/api/v1/drive/uploads/${session.id}/complete`, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } })
       if (!complete.ok) throw new Error('Upload verification failed. Select the same file and try again.')
-      setUpload(null)
+      }
+      setUploads([])
       setProgress(null)
       const input = document.getElementById('drive-upload') as HTMLInputElement | null
       if (input) input.value = ''
@@ -172,8 +174,8 @@ export default function Drive({ csrfToken }: Props) {
         <label htmlFor="folder-name">New folder</label>
         <div className="drive-action-row"><input id="folder-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Folder name" /><button disabled={busy}>Create</button></div>
       </form>
-      <div><label htmlFor="drive-upload">Upload a file</label><div className="drive-action-row"><input id="drive-upload" type="file" disabled={busy} onChange={(event) => { setUpload(event.target.files?.[0] ?? null); setProgress(null); setError(null) }} /><button type="button" disabled={!upload || busy} onClick={() => void uploadFile()}>{busy ? 'Uploading…' : progress !== null ? 'Resume' : 'Upload'}</button></div>
-        {upload && progress !== null && <div className="drive-progress"><progress max={upload.size || 1} value={progress} aria-label="Upload progress" /><span>{upload.size ? Math.round(progress / upload.size * 100) : 100}% · {Math.round(progress / 1024 / 1024)} of {Math.round(upload.size / 1024 / 1024)} MiB</span></div>}</div>
+      <div><label htmlFor="drive-upload">Upload files</label><div className="drive-action-row"><input id="drive-upload" type="file" multiple disabled={busy} onChange={(event) => { setUploads(Array.from(event.target.files ?? [])); setProgress(null); setError(null) }} /><button type="button" disabled={uploads.length === 0 || busy} onClick={() => void uploadFile()}>{busy ? 'Uploading…' : progress !== null ? 'Resume' : 'Upload'}</button></div>
+        {uploads.length > 0 && <p className="drive-note">{uploads.length} file(s) selected</p>}{uploads.length > 0 && progress !== null && <div className="drive-progress"><progress max={uploads[0].size || 1} value={progress} aria-label="Upload progress" /><span>{uploads[0].size ? Math.round(progress / uploads[0].size * 100) : 100}%</span></div>}</div>
     </div>
     <p className="drive-note">No fixed per-file cap. Uploads resume after interruption when you select the same file again; unfinished files stay hidden until complete.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
@@ -190,8 +192,9 @@ export default function Drive({ csrfToken }: Props) {
         <button type="button" className="secondary-button" onClick={() => setDetails(details === entry.path ? null : entry.path)}>{details === entry.path ? 'Hide details' : 'Details'}</button>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeEntry(entry, 'rename')}>Rename</button>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeEntry(entry, 'move')}>Move</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeEntry(entry, 'copy')}>Copy</button>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeEntry(entry, 'trash')}>Delete</button>
-        {entry.kind === 'folder' ? <button type="button" className="secondary-button" onClick={() => setFolder(entry.path)}>Open</button> :
+        {entry.kind === 'folder' ? <><button type="button" className="secondary-button" onClick={() => setFolder(entry.path)}>Open</button><a className="secondary-button download-link" href={`/api/v1/drive/folders/zip?path=${encodeURIComponent(entry.path)}`}>ZIP</a></> :
           <a className="secondary-button download-link" href={`/api/v1/drive/files?path=${encodeURIComponent(entry.path)}`}>Download</a>}
         {details === entry.path && <div className="drive-note">Path: /{entry.path} · Size: {entry.size.toLocaleString()} bytes · Modified: {new Date(entry.modifiedAt).toLocaleString()}</div>}
       </li>)}</ul>}

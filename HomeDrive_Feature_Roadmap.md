@@ -15,15 +15,15 @@
 ## 1. File management
 
 - [x] **P0** Upload single files
-- [ ] **P0** Upload multiple files
+- [x] **P0** Upload multiple files
 - [ ] **P0** Drag-and-drop uploads
 - [x] **P0** Create folders and nested folders
 - [x] **P0** Rename files and folders
 - [x] **P0** Move files and folders
-- [ ] **P0** Copy files and folders
+- [x] **P0** Copy files and folders
 - [x] **P0** Delete files and folders
 - [x] **P0** Download files
-- [ ] **P0** Download folders as ZIP
+- [x] **P0** Download folders as ZIP
 - [ ] **P0** File list and grid views
 - [ ] **P0** Sort by name, date, size, and type
 - [x] **P0** File details and metadata
