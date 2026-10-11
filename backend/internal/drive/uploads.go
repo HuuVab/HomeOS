@@ -167,6 +167,7 @@ func (s *Store) StartUpload(path string, size int64, fingerprint string) (Upload
 			return UploadSession{}, ErrInvalidPath
 		}
 		pending.Offset = info.Size()
+		s.pending[pending.ID] = pending
 		return pending, nil
 	}
 	if _, err := s.root.Lstat(target); err == nil {
@@ -264,7 +265,9 @@ func (s *Store) AppendChunk(id string, offset int64, reader io.Reader) (int64, e
 		file.Sync()
 		return offset, err
 	}
-	return offset + written, nil
+	session.Offset = offset + written
+	s.pending[id] = session
+	return session.Offset, nil
 }
 
 func (s *Store) FinishUpload(id string) error {
