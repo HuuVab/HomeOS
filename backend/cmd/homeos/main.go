@@ -72,6 +72,53 @@ func main() {
 		fmt.Println("Database backup created and verified.")
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-postgres" {
+		if databaseURL == "" || len(os.Args) > 3 || (len(os.Args) == 3 && os.Args[2] != "--apply") {
+			log.Fatal("usage: set HOMEOS_DATABASE_URL, then homeos migrate-postgres [--apply]")
+		}
+		if _, err := os.Stat(dbPath); err != nil {
+			log.Fatal("SQLite source database does not exist: ", err)
+		}
+		source, err := store.Open(dbPath)
+		if err != nil {
+			log.Fatal("open SQLite source: ", err)
+		}
+		defer source.Close()
+		files, err := drive.New(filepath.Join(dataDir, "files"))
+		if err != nil {
+			log.Fatal("open HomeDrive files: ", err)
+		}
+		defer files.Close()
+		owners, err := source.UserIDs()
+		if err != nil {
+			log.Fatal("list SQLite users: ", err)
+		}
+		fmt.Printf("SQLite source: %d users\n", len(owners))
+		for _, ownerID := range owners {
+			userFiles, err := files.ForUser(ownerID)
+			if err != nil {
+				log.Fatal("open owner files: ", err)
+			}
+			entries, err := userFiles.AllEntries()
+			if err != nil {
+				log.Fatal("scan owner files: ", err)
+			}
+			trash, err := userFiles.ListTrash()
+			if err != nil {
+				log.Fatal("scan owner Trash: ", err)
+			}
+			fmt.Printf("Owner %d: %d files/folders, %d Trash entries, %d upload sessions\n", ownerID, len(entries), len(trash), len(userFiles.PendingUploads()))
+		}
+		if len(os.Args) == 2 {
+			fmt.Println("Dry run only. Stop the server and back up SQLite and the file directory, then re-run with --apply.")
+			return
+		}
+		if err := store.MigrateSQLiteToPostgres(source, db, files); err != nil {
+			log.Fatal("migrate HomeDrive: ", err)
+		}
+		fmt.Println("PostgreSQL migration complete. Existing sessions were not copied; sign in again.")
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "drive-import" {
 		if len(os.Args) < 3 || len(os.Args) > 4 || (len(os.Args) == 4 && os.Args[3] != "--apply") {
 			log.Fatal("usage: homeos drive-import <owner-id> [--apply]")
@@ -144,7 +191,7 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 {
-		log.Fatal("usage: homeos [create-admin <username> | create-user <username> | reset-admin-password <username> | backup <new-backup-path> | drive-import <owner-id> [--apply]]")
+		log.Fatal("usage: homeos [create-admin <username> | create-user <username> | reset-admin-password <username> | backup <new-backup-path> | drive-import <owner-id> [--apply] | migrate-postgres [--apply]]")
 	}
 
 	bindAddress := os.Getenv("HOMEOS_BIND_ADDR")
