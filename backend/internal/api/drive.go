@@ -16,13 +16,22 @@ import (
 )
 
 func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64) {
-	checkSource := func(w http.ResponseWriter, name string) bool {
+	checkSource := func(w http.ResponseWriter, r *http.Request, name string) bool {
 		if !db.AuthoritativeMetadata() {
 			return true
 		}
-		_, err := db.FileEntry(ownerID, name)
+		entry, err := db.FileEntry(ownerID, name)
 		if err != nil {
 			driveError(w, err)
+			return false
+		}
+		version, parseErr := strconv.ParseInt(r.Header.Get("X-Source-Version"), 10, 64)
+		if parseErr != nil || version < 1 {
+			writeError(w, http.StatusPreconditionRequired, "version_required", "Refresh the file list and retry with X-Source-Version")
+			return false
+		}
+		if version != entry.Version {
+			writeError(w, http.StatusPreconditionFailed, "version_conflict", "The item changed; refresh the file list before retrying")
 			return false
 		}
 		return true
@@ -178,7 +187,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected source and destination paths")
 			return
 		}
-		if !checkSource(w, payload.From) || !checkTarget(w, payload.To) {
+		if !checkSource(w, r, payload.From) || !checkTarget(w, payload.To) {
 			return
 		}
 		if err := files.Move(payload.From, payload.To); err != nil {
@@ -201,7 +210,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected source and destination paths")
 			return
 		}
-		if !checkSource(w, payload.From) || !checkTarget(w, payload.To) {
+		if !checkSource(w, r, payload.From) || !checkTarget(w, payload.To) {
 			return
 		}
 		if err := files.Copy(payload.From, payload.To); err != nil {
@@ -249,7 +258,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected path")
 			return
 		}
-		if !checkSource(w, payload.Path) {
+		if !checkSource(w, r, payload.Path) {
 			return
 		}
 		if err := files.Trash(payload.Path); err != nil {

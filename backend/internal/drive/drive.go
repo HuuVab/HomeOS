@@ -41,6 +41,7 @@ type Entry struct {
 	Kind       string    `json:"kind"`
 	Size       int64     `json:"size"`
 	ModifiedAt time.Time `json:"modifiedAt"`
+	Version    int64     `json:"version,omitempty"`
 }
 
 func New(root string) (*Store, error) {

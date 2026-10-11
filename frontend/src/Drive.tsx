@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 
-type Entry = { name: string; path: string; kind: 'file' | 'folder'; size: number; modifiedAt: string }
+type Entry = { name: string; path: string; kind: 'file' | 'folder'; size: number; modifiedAt: string; version?: number }
 type TrashEntry = { id: string; path: string; deletedAt: string }
 type StorageUsage = { usedBytes: number; reservedBytes: number; quotaBytes: number; maxFileBytes: number }
 type Props = { csrfToken: string }
@@ -54,6 +54,7 @@ async function responseError(response: Response): Promise<Error> {
   const code = (await response.json().catch(() => null))?.error?.code
   if (code === 'quota_exceeded') return new Error('Storage quota exceeded. Free space or change the server quota.')
   if (response.status === 413) return new Error('File exceeds the configured size limit.')
+  if (response.status === 412 || response.status === 428) return new Error('This item changed. Refresh the file list and try again.')
   if (response.status === 409) return new Error('A file or folder already exists at that location.')
   return new Error(`HomeDrive request failed (${response.status}).`)
 }
@@ -163,8 +164,8 @@ export default function Drive({ csrfToken }: Props) {
   function navigate(path: string) { setFolder(path); setQuery(''); setSelected(new Set()); setInspected(null); setOpenMenu(null) }
   function openEntry(entry: Entry) { if (entry.kind === 'folder') navigate(entry.path); else setInspected(entry) }
 
-  async function mutate(endpoint: string, payload: object): Promise<void> {
-    const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify(payload) })
+  async function mutate(endpoint: string, payload: object, version?: number): Promise<void> {
+    const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken, ...(version ? { 'X-Source-Version': String(version) } : {}) }, body: JSON.stringify(payload) })
     if (!response.ok) throw await responseError(response)
   }
 
@@ -190,7 +191,7 @@ export default function Drive({ csrfToken }: Props) {
       payload = { from: entry.path, to }
     } else if (!window.confirm(`Move ${entry.name} to Trash?`)) return
     setBusy(true)
-    try { await mutate(endpoint, payload); setSelected((current) => { const next = new Set(current); next.delete(entry.path); return next }); await refresh(); setError(null) }
+    try { await mutate(endpoint, payload, entry.version); setSelected((current) => { const next = new Set(current); next.delete(entry.path); return next }); await refresh(); setError(null) }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not change item') }
     finally { setBusy(false) }
   }
@@ -203,7 +204,7 @@ export default function Drive({ csrfToken }: Props) {
     setBusy(true)
     try {
       for (const entry of selectedEntries) {
-        await mutate(action === 'trash' ? '/api/v1/drive/trash' : action === 'copy' ? '/api/v1/drive/copy' : '/api/v1/drive/move', action === 'trash' ? { path: entry.path } : { from: entry.path, to: destination ? `${destination}/${entry.name}` : entry.name })
+        await mutate(action === 'trash' ? '/api/v1/drive/trash' : action === 'copy' ? '/api/v1/drive/copy' : '/api/v1/drive/move', action === 'trash' ? { path: entry.path } : { from: entry.path, to: destination ? `${destination}/${entry.name}` : entry.name }, entry.version)
       }
       setSelected(new Set()); setError(null)
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Bulk action stopped') }

@@ -17,8 +17,8 @@ func (s *Store) AuthoritativeMetadata() bool { return s.dialect == "postgres" }
 func (s *Store) FileEntry(ownerID int64, name string) (drive.Entry, error) {
 	var entry drive.Entry
 	var modified int64
-	err := s.db.QueryRow(s.query(`SELECT path, kind, size, modified_at FROM file_entries WHERE owner_id = ? AND path = ?`), ownerID, name).
-		Scan(&entry.Path, &entry.Kind, &entry.Size, &modified)
+	err := s.db.QueryRow(s.query(`SELECT path, kind, size, modified_at, version FROM file_entries WHERE owner_id = ? AND path = ?`), ownerID, name).
+		Scan(&entry.Path, &entry.Kind, &entry.Size, &modified, &entry.Version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return drive.Entry{}, os.ErrNotExist
 	}
@@ -41,7 +41,7 @@ func (s *Store) FileEntries(ownerID int64, folder string) ([]drive.Entry, error)
 			return nil, drive.ErrInvalidPath
 		}
 	}
-	rows, err := s.db.Query(s.query(`SELECT path, kind, size, modified_at FROM file_entries WHERE owner_id = ? ORDER BY path`), ownerID)
+	rows, err := s.db.Query(s.query(`SELECT path, kind, size, modified_at, version FROM file_entries WHERE owner_id = ? ORDER BY path`), ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func (s *Store) FileEntries(ownerID int64, folder string) ([]drive.Entry, error)
 	for rows.Next() {
 		var entry drive.Entry
 		var modified int64
-		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &modified); err != nil {
+		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &modified, &entry.Version); err != nil {
 			return nil, err
 		}
 		if path.Dir(entry.Path) != folder && !(folder == "" && !strings.Contains(entry.Path, "/")) {
@@ -68,7 +68,7 @@ func (s *Store) SearchFileEntries(ownerID int64, query string) ([]drive.Entry, e
 	if query == "" || len(query) > 200 {
 		return nil, drive.ErrInvalidPath
 	}
-	rows, err := s.db.Query(s.query(`SELECT path, kind, size, modified_at FROM file_entries WHERE owner_id = ? ORDER BY path`), ownerID)
+	rows, err := s.db.Query(s.query(`SELECT path, kind, size, modified_at, version FROM file_entries WHERE owner_id = ? ORDER BY path`), ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (s *Store) SearchFileEntries(ownerID int64, query string) ([]drive.Entry, e
 	for rows.Next() {
 		var entry drive.Entry
 		var modified int64
-		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &modified); err != nil {
+		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &modified, &entry.Version); err != nil {
 			return nil, err
 		}
 		entry.Name = path.Base(entry.Path)

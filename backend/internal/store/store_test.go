@@ -252,6 +252,18 @@ func TestFileMetadataReadsUseCommittedRows(t *testing.T) {
 	if err != nil || len(children) != 1 || children[0].Path != "docs/note.txt" {
 		t.Fatalf("children = %+v, %v", children, err)
 	}
+	if children[0].Version != 1 {
+		t.Fatalf("initial version = %d", children[0].Version)
+	}
+	updated := append([]drive.Entry(nil), entries...)
+	updated[1].Size = 5
+	if err := db.ReplaceFileEntries(1, updated); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := db.FileEntry(1, "docs/note.txt")
+	if err != nil || changed.Version != 2 {
+		t.Fatalf("updated version = %+v, %v", changed, err)
+	}
 	if _, err := db.FileEntries(1, "root.txt"); !errors.Is(err, drive.ErrInvalidPath) {
 		t.Fatalf("file as folder = %v", err)
 	}
