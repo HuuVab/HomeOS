@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
@@ -28,6 +31,7 @@ type statusResponse struct {
 
 func NewHandler(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store) http.Handler {
 	mux := http.NewServeMux()
+	var mutationMu sync.Mutex
 	registerAuthRoutes(mux, db)
 	driveHandler := func(w http.ResponseWriter, r *http.Request) {
 		user, _, _, ok := authenticate(w, r, db)
@@ -41,18 +45,39 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 		}
 		driveMux := http.NewServeMux()
 		registerDriveRoutes(driveMux, db, userFiles)
-		driveMux.ServeHTTP(w, r)
 		metadataChanged := r.Method == http.MethodPut || r.Method == http.MethodDelete ||
 			(r.Method == http.MethodPost && r.URL.Path != "/api/v1/drive/uploads")
-		if metadataChanged {
-			entries, err := userFiles.AllEntries()
-			if err == nil {
-				err = db.ReplaceFileEntries(user.ID, entries)
-			}
-			if err != nil {
-				log.Printf("HomeDrive metadata sync for user %d: %v", user.ID, err)
+		if !metadataChanged {
+			driveMux.ServeHTTP(w, r)
+			return
+		}
+		mutationMu.Lock()
+		defer mutationMu.Unlock()
+		if err := db.BeginFileMutation(user.ID); err != nil {
+			log.Printf("HomeDrive mutation marker for user %d: %v", user.ID, err)
+			writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata is unavailable")
+			return
+		}
+		buffered := httptest.NewRecorder()
+		driveMux.ServeHTTP(buffered, r)
+		entries, err := userFiles.AllEntries()
+		if err == nil {
+			err = db.ReconcileFileMutation(user.ID, entries)
+		}
+		if err != nil {
+			log.Printf("HomeDrive metadata reconciliation for user %d: %v", user.ID, err)
+			writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata update is pending recovery")
+			return
+		}
+		response := buffered.Result()
+		defer response.Body.Close()
+		for key, values := range response.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
 			}
 		}
+		w.WriteHeader(response.StatusCode)
+		_, _ = io.Copy(w, response.Body)
 	}
 	mux.HandleFunc("/api/v1/drive", driveHandler)
 	mux.HandleFunc("/api/v1/drive/", driveHandler)
