@@ -28,17 +28,17 @@ type Status = {
 const services = [
   { id: 'overview', label: 'Overview', group: 'Home', description: 'Your HomeOS starting point.', ready: true },
   { id: 'drive', label: 'HomeDrive', group: 'Personal cloud', description: 'Files and folders on your homelab disk.', ready: true },
-  { id: 'music', label: 'HomeMusic', group: 'Personal cloud', description: 'Music library and streaming are planned.', ready: false },
-  { id: 'photos', label: 'HomePhotos', group: 'Personal cloud', description: 'Photo galleries and albums are planned.', ready: false },
-  { id: 'git', label: 'HomeGit', group: 'Personal cloud', description: 'Repository hosting and browsing are planned.', ready: false },
-  { id: 'sync', label: 'HomeSync', group: 'Personal cloud', description: 'Cross-device synchronization is planned.', ready: false },
+  { id: 'music', label: 'HomeMusic', group: 'Personal cloud', description: 'Music library and streaming will be added later.', ready: false },
+  { id: 'photos', label: 'HomePhotos', group: 'Personal cloud', description: 'Photo galleries and albums will be added later.', ready: false },
+  { id: 'git', label: 'HomeGit', group: 'Personal cloud', description: 'Repository hosting and browsing will be added later.', ready: false },
+  { id: 'sync', label: 'HomeSync', group: 'Personal cloud', description: 'Cross-device synchronization will be added later.', ready: false },
   { id: 'monitor', label: 'HomeMonitor', group: 'Infrastructure', description: 'Live host and application measurements.', ready: true },
-  { id: 'docker', label: 'HomeDocker', group: 'Infrastructure', description: 'Safe container monitoring and controls are planned.', ready: false },
-  { id: 'network', label: 'HomeNetwork', group: 'Infrastructure', description: 'Network information and administration are planned.', ready: false },
-  { id: 'backup', label: 'HomeBackup', group: 'Infrastructure', description: 'Scheduled backup and restore controls are planned.', ready: false },
-  { id: 'cam', label: 'HomeCam', group: 'Infrastructure', description: 'Camera viewing and recording are planned.', ready: false },
-  { id: 'tasks', label: 'HomeTasks', group: 'Automation', description: 'Scheduled jobs and workflows are planned.', ready: false },
-  { id: 'ai', label: 'HomeAI', group: 'Automation', description: 'Optional AI-assisted features are planned.', ready: false },
+  { id: 'docker', label: 'HomeDocker', group: 'Infrastructure', description: 'Safe container monitoring and controls will be added later.', ready: false },
+  { id: 'network', label: 'HomeNetwork', group: 'Infrastructure', description: 'Network information and administration will be added later.', ready: false },
+  { id: 'backup', label: 'HomeBackup', group: 'Infrastructure', description: 'Scheduled backup and restore controls will be added later.', ready: false },
+  { id: 'cam', label: 'HomeCam', group: 'Infrastructure', description: 'Camera viewing and recording will be added later.', ready: false },
+  { id: 'tasks', label: 'HomeTasks', group: 'Automation', description: 'Scheduled jobs and workflows will be added later.', ready: false },
+  { id: 'ai', label: 'HomeAI', group: 'Automation', description: 'Optional AI-assisted features will be added later.', ready: false },
 ] as const
 
 function sectionFromHash(): string {
@@ -70,10 +70,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeSection, setActiveSection] = useState(sectionFromHash)
+  const [navOpen, setNavOpen] = useState(false)
   const activeRequest = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    const onHashChange = () => setActiveSection(sectionFromHash())
+    const onHashChange = () => {
+      setActiveSection(sectionFromHash())
+      setNavOpen(false)
+    }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
@@ -191,29 +195,44 @@ export default function App() {
 	)
 
   const current = services.find((service) => service.id === activeSection) ?? services[0]
+  const systemOnline = !error && data?.status === 'healthy'
+  const systemLabel = loading && !data ? 'Checking system' : systemOnline ? 'System online' : 'Status unavailable'
+  const summaryValue = (id: string) => {
+    if (error) return 'Unavailable'
+    if (!data) return loading ? 'Loading…' : 'Unavailable'
+    const metric = data.metrics.find((item) => item.id === id)
+    return metric?.state === 'available' ? formatMetric(metric) : 'Unavailable'
+  }
 
-  const health = <section className="overview" aria-live="polite">
-    <div>
-      <p className="eyebrow">System overview</p>
-      <h2>{loading ? 'Connecting…' : error ? 'Connection needs attention' : 'Application is healthy'}</h2>
-      <p>{error ?? 'Live measurements from your Windows host and HomeOS.'}</p>
+  const health = <section className="overview" aria-label="System status">
+    <div className="status-heading">
+      <h2>System status</h2>
+      <span role="status" className={`system-state ${systemOnline ? 'state-online' : error ? 'state-error' : ''}`}>
+        <span className="status-dot" />{systemLabel}
+      </span>
     </div>
-    <div className={`status-pill ${error ? 'status-error' : ''}`}>
-      <span className="status-dot" /> {error ? 'Unavailable' : loading ? 'Checking' : 'Online'}
-    </div>
+    <dl className="status-metrics">
+      <div><dt>CPU usage</dt><dd>{summaryValue('host_cpu')}</dd></div>
+      <div><dt>RAM usage</dt><dd>{summaryValue('host_memory')}</dd></div>
+      <div><dt>Storage usage</dt><dd>{summaryValue('host_data_disk')}</dd></div>
+      <div><dt>Service health</dt><dd>{systemOnline ? 'Healthy' : loading && !data ? 'Checking…' : 'Unavailable'}</dd></div>
+    </dl>
+    {error && <p className="status-message" role="alert">{error}. Last successful sample: {data ? new Date(data.sampledAt).toLocaleTimeString() : 'none'}.</p>}
   </section>
 
   return <div className="app-layout">
     <aside className="sidebar">
-      <a className="sidebar-brand" href="#/overview">HomeOS<span>Personal cloud · Homelab</span></a>
-      <nav className="sidebar-nav" aria-label="Services">
+      <div className="sidebar-top">
+        <a className="sidebar-brand" href="#/overview" onClick={() => setNavOpen(false)}>HomeOS<span>Personal cloud · Homelab</span></a>
+        <button className="mobile-menu-button secondary-button" type="button" aria-expanded={navOpen} aria-controls="service-navigation" onClick={() => setNavOpen((open) => !open)}>{navOpen ? 'Close menu' : 'Menu'}</button>
+      </div>
+      <nav className="sidebar-nav" id="service-navigation" data-open={navOpen} aria-label="Services">
         {['Home', 'Personal cloud', 'Infrastructure', 'Automation'].map((group) =>
           <div className="nav-group" key={group}>
             <p className="nav-group-title">{group}</p>
             {services.filter((service) => service.group === group).map((service) =>
-              <a key={service.id} className={`nav-link ${activeSection === service.id ? 'nav-active' : ''}`} href={`#/${service.id}`} aria-current={activeSection === service.id ? 'page' : undefined}>
-                <span>{service.label}</span>{!service.ready && <small>Planned</small>}
-              </a>)}
+              service.ready ? <a key={service.id} className={`nav-link ${activeSection === service.id ? 'nav-active' : ''}`} href={`#/${service.id}`} aria-current={activeSection === service.id ? 'page' : undefined}>{service.label}</a> :
+                <span key={service.id} className="nav-link nav-unavailable" aria-disabled="true" title="Coming soon">{service.label}<span className="sr-only"> (Coming soon)</span></span>)}
           </div>)}
       </nav>
     </aside>
@@ -226,16 +245,16 @@ export default function App() {
 
       {activeSection === 'overview' && <>
         {health}
-        <div className="section-heading"><div><p className="eyebrow">Available now</p><h2>Services</h2></div></div>
+        <div className="section-heading"><h2>Services</h2></div>
         <section className="service-grid" aria-label="Available services">
-          <a className="service-card" href="#/drive"><span>HomeDrive</span><p>Browse folders, upload files, and download them from your homelab disk.</p><strong>Open Drive →</strong></a>
-          <a className="service-card" href="#/monitor"><span>HomeMonitor</span><p>See live CPU, memory, disk, and application measurements.</p><strong>Open Monitor →</strong></a>
+          <article className="service-card"><h3>HomeDrive</h3><p>File storage and folders</p><span className="service-state">Enabled</span><a href="#/drive">Open service</a></article>
+          <article className="service-card"><h3>HomeMonitor</h3><p>Host and application metrics</p><span className={`service-state ${error ? 'service-state-error' : ''}`}>{systemOnline ? 'Healthy' : loading && !data ? 'Checking' : 'Unavailable'}</span><a href="#/monitor">Open service</a></article>
         </section>
       </>}
 
       {activeSection === 'monitor' && <>
         {health}
-        <div className="section-heading"><div><p className="eyebrow">Live status</p><h2>System metrics</h2></div><button type="button" onClick={() => void refresh()}>Refresh now</button></div>
+        <div className="section-heading"><h2>System metrics</h2><button type="button" onClick={() => void refresh()}>Refresh now</button></div>
         <section className="cards" aria-label="System metrics">
           {data?.metrics.map((metric) => {
             const stale = Boolean(error) || metric.state === 'stale'
@@ -254,7 +273,7 @@ export default function App() {
 
       {activeSection === 'drive' && <Drive csrfToken={session.csrfToken} />}
 
-      {!current.ready && <section className="planned-panel"><span className="planned-badge">Planned service</span><h2>{current.label} is not active yet</h2><p>{current.description} This page will become its own dashboard as the module is built. No controls are available here yet.</p></section>}
+      {!current.ready && <section className="planned-panel"><span className="planned-badge">Coming soon</span><h2>{current.label} is not active yet</h2><p>{current.description} This page will become its own dashboard as the module is built. No controls are available here yet.</p></section>}
     </main>
   </div>
 }

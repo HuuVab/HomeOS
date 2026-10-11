@@ -82,7 +82,7 @@ export default function Drive({ csrfToken }: Props) {
     {folder && <button type="button" className="secondary-button" onClick={() => setFolder(folder.split('/').slice(0, -1).join('/'))}>↑ Parent folder</button>}
     {loading ? <p className="empty">Loading files…</p> : entries.length === 0 ? <p className="empty">This folder is empty.</p> :
       <ul className="drive-list">{entries.map((entry) => <li key={entry.path}>
-        <span>{entry.kind === 'folder' ? '📁' : '📄'} {entry.name}</span>
+        <span><span className="entry-kind">{entry.kind === 'folder' ? 'Folder' : 'File'}</span>{entry.name}</span>
         {entry.kind === 'folder' ? <button type="button" className="secondary-button" onClick={() => setFolder(entry.path)}>Open</button> :
           <a className="secondary-button download-link" href={`/api/v1/drive/files?path=${encodeURIComponent(entry.path)}`}>Download</a>}
       </li>)}</ul>}
