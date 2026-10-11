@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
@@ -31,7 +30,6 @@ type statusResponse struct {
 
 func NewHandler(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store) http.Handler {
 	mux := http.NewServeMux()
-	var mutationMu sync.Mutex
 	registerAuthRoutes(mux, db)
 	driveHandler := func(w http.ResponseWriter, r *http.Request) {
 		user, _, _, ok := authenticate(w, r, db)
@@ -60,12 +58,12 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 		if db.AuthoritativeMetadata() {
 			pending, err := db.HasPendingFileMutation(user.ID)
 			if err == nil && pending {
-				mutationMu.Lock()
+				db.LockDriveMutations()
 				pending, err = db.HasPendingFileMutation(user.ID)
 				if err == nil && pending {
 					err = reconcile()
 				}
-				mutationMu.Unlock()
+				db.UnlockDriveMutations()
 			}
 			if err != nil {
 				log.Printf("HomeDrive pending metadata recovery for user %d: %v", user.ID, err)
@@ -81,8 +79,8 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			driveMux.ServeHTTP(w, r)
 			return
 		}
-		mutationMu.Lock()
-		defer mutationMu.Unlock()
+		db.LockDriveMutations()
+		defer db.UnlockDriveMutations()
 		if db.AuthoritativeMetadata() {
 			current, err := userFiles.AllEntries()
 			if err != nil {
