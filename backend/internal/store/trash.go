@@ -60,6 +60,27 @@ func (s *Store) TrashOwners() ([]int64, error) {
 	return owners, rows.Err()
 }
 
+func (s *Store) TrashMatchesSnapshot(ownerID int64, snapshot []drive.TrashEntry) (bool, error) {
+	stored, err := s.TrashEntries(ownerID)
+	if err != nil {
+		return false, err
+	}
+	if len(stored) != len(snapshot) {
+		return false, nil
+	}
+	byID := make(map[string]drive.TrashEntry, len(stored))
+	for _, entry := range stored {
+		byID[entry.ID] = entry
+	}
+	for _, entry := range snapshot {
+		old, ok := byID[entry.ID]
+		if !ok || old.Path != entry.Path || old.DeletedAt.Unix() != entry.DeletedAt.Unix() {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (s *Store) replaceTrashEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.TrashEntry) error {
 	if _, err := tx.Exec(s.query(`DELETE FROM trash_entries WHERE owner_id = ?`), ownerID); err != nil {
 		return err

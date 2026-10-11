@@ -288,6 +288,12 @@ func TestTrashMetadataReconcilesAtomically(t *testing.T) {
 	if err != nil || got.Path != item.Path {
 		t.Fatalf("trash entry = %+v, %v", got, err)
 	}
+	if matches, err := db.TrashMatchesSnapshot(1, []drive.TrashEntry{item}); err != nil || !matches {
+		t.Fatalf("Trash snapshot mismatch: %v, %v", matches, err)
+	}
+	if matches, err := db.TrashMatchesSnapshot(1, nil); err != nil || matches {
+		t.Fatalf("missing Trash item undetected: %v, %v", matches, err)
+	}
 	other, err := db.TrashEntries(2)
 	if err != nil || len(other) != 0 {
 		t.Fatalf("other owner's trash = %+v, %v", other, err)
