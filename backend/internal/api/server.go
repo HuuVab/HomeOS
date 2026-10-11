@@ -43,17 +43,27 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			writeError(w, http.StatusInternalServerError, "storage_error", "Storage unavailable")
 			return
 		}
+		reconcile := func() error {
+			entries, err := userFiles.AllEntries()
+			if err != nil {
+				return err
+			}
+			if db.AuthoritativeMetadata() {
+				trash, err := userFiles.ListTrash()
+				if err != nil {
+					return err
+				}
+				return db.ReconcileDriveMutation(user.ID, entries, trash)
+			}
+			return db.ReconcileFileMutation(user.ID, entries)
+		}
 		if db.AuthoritativeMetadata() {
 			pending, err := db.HasPendingFileMutation(user.ID)
 			if err == nil && pending {
 				mutationMu.Lock()
 				pending, err = db.HasPendingFileMutation(user.ID)
 				if err == nil && pending {
-					var entries []drive.Entry
-					entries, err = userFiles.AllEntries()
-					if err == nil {
-						err = db.ReconcileFileMutation(user.ID, entries)
-					}
+					err = reconcile()
 				}
 				mutationMu.Unlock()
 			}
@@ -109,10 +119,7 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 				return
 			}
 		} else {
-			entries, err := userFiles.AllEntries()
-			if err == nil {
-				err = db.ReconcileFileMutation(user.ID, entries)
-			}
+			err := reconcile()
 			if err != nil {
 				log.Printf("HomeDrive metadata reconciliation for user %d: %v", user.ID, err)
 				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata update is pending recovery")
