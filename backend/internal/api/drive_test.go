@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -50,6 +51,22 @@ func TestHomeDriveAccessAndRoundTrip(t *testing.T) {
 	}
 	if response := call("PUT", "/api/v1/drive/files?path=docs%2Fnote.txt", "hello", session.CSRFToken, cookie); response.Code != 201 {
 		t.Fatalf("upload = %d: %s", response.Code, response.Body.String())
+	}
+	changes := call("GET", "/api/v1/drive/changes", "", "", cookie)
+	if changes.Code != 200 || !strings.Contains(changes.Body.String(), `"operation":"create"`) || !strings.Contains(changes.Body.String(), `"path":"docs/note.txt"`) {
+		t.Fatalf("changes = %d: %s", changes.Code, changes.Body.String())
+	}
+	var feed struct {
+		NextCursor int64 `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(changes.Body.Bytes(), &feed); err != nil || feed.NextCursor < 1 {
+		t.Fatalf("change cursor = %d, %v", feed.NextCursor, err)
+	}
+	if response := call("GET", "/api/v1/drive/changes?after="+strconv.FormatInt(feed.NextCursor, 10), "", "", cookie); response.Code != 200 || !strings.Contains(response.Body.String(), `"events":[]`) {
+		t.Fatalf("empty change page = %d: %s", response.Code, response.Body.String())
+	}
+	if response := call("GET", "/api/v1/drive/changes?after=-1", "", "", cookie); response.Code != 400 {
+		t.Fatalf("negative cursor = %d", response.Code)
 	}
 	if got := call("PUT", "/api/v1/drive/files?path=docs%2Fnote.txt", "replace", session.CSRFToken, cookie).Code; got != 409 {
 		t.Fatalf("overwrite = %d", got)
@@ -104,6 +121,9 @@ func TestHomeDriveUserIsolation(t *testing.T) {
 	}
 	if res := call("PUT", "/api/v1/drive/files?path=private.txt", "admin", adminCSRF, adminCookie); res.Code != 201 {
 		t.Fatalf("admin upload: %d", res.Code)
+	}
+	if res := call("GET", "/api/v1/drive/changes", "", "", userCookie); res.Code != 200 || !strings.Contains(res.Body.String(), `"events":[]`) {
+		t.Fatalf("user sees admin changes: %d %s", res.Code, res.Body.String())
 	}
 	if res := call("GET", "/api/v1/drive/files?path=private.txt", "", "", userCookie); res.Code != 404 {
 		t.Fatalf("user reads admin file: %d", res.Code)

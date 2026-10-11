@@ -49,6 +49,30 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		writeJSON(w, http.StatusOK, usage)
 	})
+	mux.HandleFunc("GET /api/v1/drive/changes", func(w http.ResponseWriter, r *http.Request) {
+		user, _, _, ok := authenticate(w, r, db)
+		if !ok {
+			return
+		}
+		after := int64(0)
+		if raw := r.URL.Query().Get("after"); raw != "" {
+			var err error
+			after, err = strconv.ParseInt(raw, 10, 64)
+			if err != nil || after < 0 {
+				writeError(w, http.StatusBadRequest, "invalid_cursor", "Expected a non-negative change cursor")
+				return
+			}
+		}
+		events, err := db.ChangesAfter(user.ID, after, 100)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive changes are unavailable")
+			return
+		}
+		if len(events) > 0 {
+			after = events[len(events)-1].ID
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"events": events, "nextCursor": after})
+	})
 	mux.HandleFunc("GET /api/v1/drive/search", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, false) {
 			return
