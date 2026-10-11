@@ -156,10 +156,12 @@ func main() {
 		}
 		log.Printf("Recovered HomeDrive metadata for user %d", ownerID)
 	}
-	if entries, err := files.AllEntries(); err != nil {
-		log.Fatal("scan HomeDrive: ", err)
-	} else if err := db.ReplaceFileEntries(1, entries); err != nil {
-		log.Fatal("index HomeDrive: ", err)
+	if !db.AuthoritativeMetadata() {
+		if entries, err := files.AllEntries(); err != nil {
+			log.Fatal("scan HomeDrive: ", err)
+		} else if err := db.ReplaceFileEntries(1, entries); err != nil {
+			log.Fatal("index HomeDrive: ", err)
+		}
 	}
 	retentionDays := 30
 	if configured := os.Getenv("HOMEOS_TRASH_RETENTION_DAYS"); configured != "" {
