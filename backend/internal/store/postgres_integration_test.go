@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,6 +78,22 @@ func TestPostgresMetadataIntegration(t *testing.T) {
 	if err != nil || len(events) != 2 {
 		t.Fatalf("events = %+v, %v", events, err)
 	}
+	trash := drive.TrashEntry{ID: "00000000000000000000000000000001", Path: "old.txt", DeletedAt: stamp}
+	upload := drive.UploadSession{ID: "00000000000000000000000000000002", Path: "later.txt", Size: 4, Fingerprint: strings.Repeat("a", 64), Offset: 2, Staged: true}
+	if err := db.BeginFileMutation(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReconcileDriveMutation(1, entries, []drive.TrashEntry{trash}, []drive.UploadSession{upload}); err != nil {
+		t.Fatal(err)
+	}
+	storedTrash, err := db.TrashEntries(1)
+	if err != nil || len(storedTrash) != 1 || storedTrash[0].ID != trash.ID {
+		t.Fatalf("trash = %+v, %v", storedTrash, err)
+	}
+	storedUpload, err := db.PendingUploadSession(1, upload.ID)
+	if err != nil || storedUpload.Offset != 2 {
+		t.Fatalf("upload = %+v, %v", storedUpload, err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -88,5 +105,11 @@ func TestPostgresMetadataIntegration(t *testing.T) {
 	children, err = db.FileEntries(1, "docs")
 	if err != nil || len(children) != 1 {
 		t.Fatalf("entries after restart = %+v, %v", children, err)
+	}
+	if _, err := db.TrashEntry(1, trash.ID); err != nil {
+		t.Fatalf("Trash after restart: %v", err)
+	}
+	if _, err := db.PendingUploadSession(1, upload.ID); err != nil {
+		t.Fatalf("upload after restart: %v", err)
 	}
 }
