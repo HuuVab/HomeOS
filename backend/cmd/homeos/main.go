@@ -72,6 +72,46 @@ func main() {
 		fmt.Println("Database backup created and verified.")
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "drive-import" {
+		if len(os.Args) < 3 || len(os.Args) > 4 || (len(os.Args) == 4 && os.Args[3] != "--apply") {
+			log.Fatal("usage: homeos drive-import <owner-id> [--apply]")
+		}
+		ownerID, parseErr := strconv.ParseInt(os.Args[2], 10, 64)
+		if parseErr != nil || ownerID < 1 {
+			log.Fatal("owner-id must be a positive integer")
+		}
+		if err := db.CheckDriveImport(ownerID); err != nil {
+			log.Fatal("drive import is unavailable: ", err)
+		}
+		files, err := drive.New(filepath.Join(dataDir, "files"))
+		if err != nil {
+			log.Fatal("open HomeDrive: ", err)
+		}
+		defer files.Close()
+		userFiles, err := files.ForUser(ownerID)
+		if err != nil {
+			log.Fatal("open owner files: ", err)
+		}
+		entries, err := userFiles.AllEntries()
+		if err != nil {
+			log.Fatal("scan owner files: ", err)
+		}
+		trash, err := userFiles.ListTrash()
+		if err != nil {
+			log.Fatal("scan owner Trash: ", err)
+		}
+		uploads := userFiles.PendingUploads()
+		fmt.Printf("Owner %d: %d files/folders, %d Trash entries, %d upload sessions\n", ownerID, len(entries), len(trash), len(uploads))
+		if len(os.Args) == 3 {
+			fmt.Println("Dry run only. Re-run with --apply to import into the empty PostgreSQL catalog.")
+			return
+		}
+		if err := db.ImportDriveSnapshot(ownerID, entries, trash, uploads); err != nil {
+			log.Fatal("import HomeDrive snapshot: ", err)
+		}
+		fmt.Println("HomeDrive snapshot imported.")
+		return
+	}
 
 	if len(os.Args) > 1 && (os.Args[1] == "create-admin" || os.Args[1] == "create-user" || os.Args[1] == "reset-admin-password") {
 		if len(os.Args) != 3 || !validUsername.MatchString(os.Args[2]) {
@@ -104,7 +144,7 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 {
-		log.Fatal("usage: homeos [create-admin <username> | create-user <username> | reset-admin-password <username> | backup <new-backup-path>]")
+		log.Fatal("usage: homeos [create-admin <username> | create-user <username> | reset-admin-password <username> | backup <new-backup-path> | drive-import <owner-id> [--apply]]")
 	}
 
 	bindAddress := os.Getenv("HOMEOS_BIND_ADDR")
