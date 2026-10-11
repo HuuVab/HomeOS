@@ -96,6 +96,20 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 				writeError(w, http.StatusConflict, "metadata_drift", "HomeDrive files differ from committed metadata")
 				return
 			}
+			trash, err := userFiles.ListTrash()
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "HomeDrive Trash is unavailable")
+				return
+			}
+			matches, err = db.TrashMatchesSnapshot(user.ID, trash)
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive Trash metadata is unavailable")
+				return
+			}
+			if !matches {
+				writeError(w, http.StatusConflict, "metadata_drift", "HomeDrive Trash differs from committed metadata")
+				return
+			}
 		}
 		if err := db.BeginFileMutation(user.ID); err != nil {
 			log.Printf("HomeDrive mutation marker for user %d: %v", user.ID, err)
