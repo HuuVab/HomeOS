@@ -180,8 +180,41 @@ func main() {
 	}
 	retention := time.Duration(retentionDays) * 24 * time.Hour
 	cleanup := func() {
-		if _, err := files.PurgeExpired(retention, time.Now()); err != nil {
-			log.Printf("HomeDrive trash cleanup: %v", err)
+		if !db.AuthoritativeMetadata() {
+			if _, err := files.PurgeExpired(retention, time.Now()); err != nil {
+				log.Printf("HomeDrive trash cleanup: %v", err)
+			}
+			return
+		}
+		db.LockDriveMutations()
+		defer db.UnlockDriveMutations()
+		owners, err := db.TrashOwners()
+		if err != nil {
+			log.Printf("list HomeDrive Trash owners: %v", err)
+			return
+		}
+		for _, ownerID := range owners {
+			userFiles, err := files.ForUser(ownerID)
+			if err == nil {
+				err = db.BeginFileMutation(ownerID)
+			}
+			if err == nil {
+				_, err = userFiles.PurgeExpired(retention, time.Now())
+			}
+			var entries []drive.Entry
+			if err == nil {
+				entries, err = userFiles.AllEntries()
+			}
+			var trash []drive.TrashEntry
+			if err == nil {
+				trash, err = userFiles.ListTrash()
+			}
+			if err == nil {
+				err = db.ReconcileDriveMutation(ownerID, entries, trash)
+			}
+			if err != nil {
+				log.Printf("HomeDrive Trash cleanup for user %d: %v", ownerID, err)
+			}
 		}
 	}
 	cleanup()
