@@ -44,7 +44,7 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			return
 		}
 		driveMux := http.NewServeMux()
-		registerDriveRoutes(driveMux, db, userFiles)
+		registerDriveRoutes(driveMux, db, userFiles, user.ID)
 		metadataChanged := r.Method == http.MethodPut || r.Method == http.MethodDelete ||
 			(r.Method == http.MethodPost && r.URL.Path != "/api/v1/drive/uploads")
 		if !metadataChanged {

@@ -15,7 +15,7 @@ import (
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
 
-func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store) {
+func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64) {
 	check := func(w http.ResponseWriter, r *http.Request, mutate bool) bool {
 		_, csrf, _, ok := authenticate(w, r, db)
 		if !ok {
@@ -31,7 +31,13 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		if !check(w, r, false) {
 			return
 		}
-		entries, err := files.List(r.URL.Query().Get("path"))
+		var entries []drive.Entry
+		var err error
+		if db.AuthoritativeMetadata() {
+			entries, err = db.FileEntries(ownerID, r.URL.Query().Get("path"))
+		} else {
+			entries, err = files.List(r.URL.Query().Get("path"))
+		}
 		if err != nil {
 			driveError(w, err)
 			return
@@ -77,7 +83,13 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		if !check(w, r, false) {
 			return
 		}
-		entries, err := files.Search(r.URL.Query().Get("q"))
+		var entries []drive.Entry
+		var err error
+		if db.AuthoritativeMetadata() {
+			entries, err = db.SearchFileEntries(ownerID, r.URL.Query().Get("q"))
+		} else {
+			entries, err = files.Search(r.URL.Query().Get("q"))
+		}
 		if err != nil {
 			driveError(w, err)
 			return
@@ -89,6 +101,17 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			return
 		}
 		name := r.URL.Query().Get("path")
+		if db.AuthoritativeMetadata() {
+			entry, err := db.FileEntry(ownerID, name)
+			if err != nil {
+				driveError(w, err)
+				return
+			}
+			if entry.Kind != "file" {
+				driveError(w, drive.ErrInvalidPath)
+				return
+			}
+		}
 		file, contentType, err := files.OpenPreview(name)
 		if err != nil {
 			driveError(w, err)
@@ -150,6 +173,17 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			return
 		}
 		folder := r.URL.Query().Get("path")
+		if db.AuthoritativeMetadata() {
+			entry, err := db.FileEntry(ownerID, folder)
+			if err != nil {
+				driveError(w, err)
+				return
+			}
+			if entry.Kind != "folder" {
+				driveError(w, drive.ErrInvalidPath)
+				return
+			}
+		}
 		if err := files.ValidateFolder(folder); err != nil {
 			driveError(w, err)
 			return
@@ -292,6 +326,17 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			return
 		}
 		name := r.URL.Query().Get("path")
+		if db.AuthoritativeMetadata() {
+			entry, err := db.FileEntry(ownerID, name)
+			if err != nil {
+				driveError(w, err)
+				return
+			}
+			if entry.Kind != "file" {
+				driveError(w, drive.ErrInvalidPath)
+				return
+			}
+		}
 		file, err := files.Open(name)
 		if err != nil {
 			driveError(w, err)
