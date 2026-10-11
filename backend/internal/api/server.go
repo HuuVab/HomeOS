@@ -73,6 +73,22 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 		}
 		mutationMu.Lock()
 		defer mutationMu.Unlock()
+		if db.AuthoritativeMetadata() {
+			current, err := userFiles.AllEntries()
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "HomeDrive storage is unavailable")
+				return
+			}
+			matches, err := db.MetadataMatchesSnapshot(user.ID, current)
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata is unavailable")
+				return
+			}
+			if !matches {
+				writeError(w, http.StatusConflict, "metadata_drift", "HomeDrive files differ from committed metadata")
+				return
+			}
+		}
 		if err := db.BeginFileMutation(user.ID); err != nil {
 			log.Printf("HomeDrive mutation marker for user %d: %v", user.ID, err)
 			writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata is unavailable")
