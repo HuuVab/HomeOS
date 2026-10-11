@@ -43,6 +43,23 @@ func (s *Store) TrashEntry(ownerID int64, id string) (drive.TrashEntry, error) {
 	return entry, nil
 }
 
+func (s *Store) TrashOwners() ([]int64, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT owner_id FROM trash_entries ORDER BY owner_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	owners := make([]int64, 0)
+	for rows.Next() {
+		var ownerID int64
+		if err := rows.Scan(&ownerID); err != nil {
+			return nil, err
+		}
+		owners = append(owners, ownerID)
+	}
+	return owners, rows.Err()
+}
+
 func (s *Store) replaceTrashEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.TrashEntry) error {
 	if _, err := tx.Exec(s.query(`DELETE FROM trash_entries WHERE owner_id = ?`), ownerID); err != nil {
 		return err
