@@ -42,16 +42,17 @@ func (s *Store) reconcileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.En
 	type previousEntry struct {
 		kind                      string
 		size, modifiedAt, version int64
+		checksum                  sql.NullString
 	}
 	previous := make(map[string]previousEntry)
-	rows, err := tx.Query(s.query(`SELECT path, kind, size, modified_at, version FROM file_entries WHERE owner_id = ?`), ownerID)
+	rows, err := tx.Query(s.query(`SELECT path, kind, size, modified_at, version, checksum FROM file_entries WHERE owner_id = ?`), ownerID)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var path string
 		var old previousEntry
-		if err := rows.Scan(&path, &old.kind, &old.size, &old.modifiedAt, &old.version); err != nil {
+		if err := rows.Scan(&path, &old.kind, &old.size, &old.modifiedAt, &old.version, &old.checksum); err != nil {
 			rows.Close()
 			return err
 		}
@@ -68,7 +69,16 @@ func (s *Store) reconcileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.En
 		delete(previous, entry.Path)
 		modifiedAt := entry.ModifiedAt.Unix()
 		if exists && old.kind == entry.Kind && old.size == entry.Size && old.modifiedAt == modifiedAt {
-			continue
+			if entry.Checksum != "" && (!old.checksum.Valid || old.checksum.String != entry.Checksum) {
+				if !old.checksum.Valid {
+					if _, err := tx.Exec(s.query(`UPDATE file_entries SET checksum = ? WHERE owner_id = ? AND path = ?`), entry.Checksum, ownerID, entry.Path); err != nil {
+						return err
+					}
+					continue
+				}
+			} else {
+				continue
+			}
 		}
 		version := int64(1)
 		operation := "create"
@@ -76,9 +86,9 @@ func (s *Store) reconcileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.En
 			version = old.version + 1
 			operation = "update"
 		}
-		if _, err := tx.Exec(s.query(`INSERT INTO file_entries (owner_id, path, kind, size, modified_at, version) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (owner_id, path) DO UPDATE SET kind = EXCLUDED.kind, size = EXCLUDED.size, modified_at = EXCLUDED.modified_at, version = EXCLUDED.version`),
-			ownerID, entry.Path, entry.Kind, entry.Size, modifiedAt, version); err != nil {
+		if _, err := tx.Exec(s.query(`INSERT INTO file_entries (owner_id, path, kind, size, modified_at, version, checksum) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+			ON CONFLICT (owner_id, path) DO UPDATE SET kind = EXCLUDED.kind, size = EXCLUDED.size, modified_at = EXCLUDED.modified_at, version = EXCLUDED.version, checksum = EXCLUDED.checksum`),
+			ownerID, entry.Path, entry.Kind, entry.Size, modifiedAt, version, entry.Checksum); err != nil {
 			return err
 		}
 		if recordEvents {
