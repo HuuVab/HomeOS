@@ -84,7 +84,7 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 		names = append(names, name)
 	}
 	sort.Slice(names, func(i, j int) bool {
-		depthI, depthJ := len(filepath.SplitList(names[i])), len(filepath.SplitList(names[j]))
+		depthI, depthJ := pathDepth(names[i]), pathDepth(names[j])
 		if depthI != depthJ {
 			return depthI < depthJ
 		}
