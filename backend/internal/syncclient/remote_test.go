@@ -90,3 +90,24 @@ func TestRemoteRejectsCaseCollidingFilesOnWindows(t *testing.T) {
 		t.Fatal("expected server case collision to be rejected")
 	}
 }
+
+func TestRemoteDoesNotForwardPasswordAcrossRedirect(t *testing.T) {
+	forwarded := false
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer other.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", other.URL)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	remote, err := NewRemote(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Login(context.Background(), "test", "secret"); err == nil || forwarded {
+		t.Fatalf("redirect login error=%v forwarded=%t", err, forwarded)
+	}
+}
