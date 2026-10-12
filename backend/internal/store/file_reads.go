@@ -96,20 +96,20 @@ func (s *Store) SearchFileEntries(ownerID int64, query string) ([]drive.Entry, e
 // MetadataMatchesSnapshot detects out-of-band filesystem changes before a
 // PostgreSQL-backed mutation can publish them into the authoritative catalog.
 func (s *Store) MetadataMatchesSnapshot(ownerID int64, entries []drive.Entry) (bool, error) {
-	rows, err := s.db.Query(s.query(`SELECT path, kind, size, modified_at FROM file_entries WHERE owner_id = ?`), ownerID)
+	rows, err := s.db.Query(s.query(`SELECT path, kind, size, modified_at, COALESCE(checksum, '') FROM file_entries WHERE owner_id = ?`), ownerID)
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
 	type metadata struct {
-		kind             string
+		kind, checksum   string
 		size, modifiedAt int64
 	}
 	stored := make(map[string]metadata)
 	for rows.Next() {
 		var name string
 		var item metadata
-		if err := rows.Scan(&name, &item.kind, &item.size, &item.modifiedAt); err != nil {
+		if err := rows.Scan(&name, &item.kind, &item.size, &item.modifiedAt, &item.checksum); err != nil {
 			return false, err
 		}
 		stored[name] = item
@@ -122,7 +122,7 @@ func (s *Store) MetadataMatchesSnapshot(ownerID int64, entries []drive.Entry) (b
 	}
 	for _, entry := range entries {
 		item, ok := stored[entry.Path]
-		if !ok || item.kind != entry.Kind || item.size != entry.Size || item.modifiedAt != entry.ModifiedAt.Unix() {
+		if !ok || item.kind != entry.Kind || item.size != entry.Size || item.modifiedAt != entry.ModifiedAt.Unix() || (item.checksum != "" && item.checksum != entry.Checksum) {
 			return false, nil
 		}
 	}
