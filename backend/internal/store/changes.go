@@ -91,6 +91,12 @@ func (s *Store) reconcileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.En
 		if exists {
 			version = old.version + 1
 			operation = "update"
+		} else if entry.Kind == "file" {
+			var lastVersion int64
+			if err := tx.QueryRow(s.query(`SELECT COALESCE(MAX(version), 0) FROM file_versions WHERE owner_id = ? AND path = ?`), ownerID, entry.Path).Scan(&lastVersion); err != nil {
+				return err
+			}
+			version = lastVersion + 1
 		}
 		if _, err := tx.Exec(s.query(`INSERT INTO file_entries (owner_id, path, kind, size, modified_at, version, checksum) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''))
 			ON CONFLICT (owner_id, path) DO UPDATE SET kind = EXCLUDED.kind, size = EXCLUDED.size, modified_at = EXCLUDED.modified_at, version = EXCLUDED.version, checksum = EXCLUDED.checksum`),
