@@ -265,6 +265,16 @@ form > input { margin-bottom: 16px; }
 .drive-inspector dt { color: #8f949e; }
 .drive-inspector dd { overflow-wrap: anywhere; }
 .drive-download { display: inline-flex; margin-top: 24px; padding: 9px 14px; border-radius: 7px; background: #0b9de8; color: #06111c; font-weight: 700; text-decoration: none; }
+.drive-versions { margin-top: 28px; padding-top: 18px; border-top: 1px solid #383a40; }
+.drive-versions h3 { margin: 0 0 12px; font-size: 15px; }
+.drive-versions p { color: #aeb3bb; font-size: 13px; }
+.drive-versions ul { margin: 0; padding: 0; list-style: none; }
+.drive-versions li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid #34363b; }
+.drive-versions li span { display: grid; gap: 4px; min-width: 0; }
+.drive-versions li strong { font-size: 13px; }
+.drive-versions li small { color: #aeb3bb; }
+.drive-versions li button { padding: 6px 10px; border: 1px solid #50535b; border-radius: 6px; background: #30343b; color: #fff; cursor: pointer; }
+.drive-versions li button:disabled { opacity: .5; cursor: default; }
 
 @media (max-width: 900px) {
   .drive-table-head, .drive-data-row { grid-template-columns: 30px minmax(120px, 1fr) 80px 34px; }
