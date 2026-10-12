@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package homedrive.metadata.v1;
+
+option go_package = "github.com/HuuVab/HomeOS/backend/internal/metadatapb";
+
+// Internal only: callers must already have authenticated an owner.
+service MetadataService {
+  rpc GetFile(GetFileRequest) returns (FileEntry);
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  rpc CreateFolder(CreateFolderRequest) returns (FileEntry);
+}
+
+message GetFileRequest {
+  int64 owner_id = 1;
+  string path = 2;
+}
+
+message ListFilesRequest {
+  int64 owner_id = 1;
+  string folder = 2;
+}
+
+message CreateFolderRequest {
+  int64 owner_id = 1;
+  string path = 2;
+}
+
+message FileEntry {
+  string name = 1;
+  string path = 2;
+  string kind = 3;
+  int64 size = 4;
+  int64 modified_at_unix = 5;
+  int64 version = 6;
+}
+
+message ListFilesResponse {
+  repeated FileEntry entries = 1;
+}
