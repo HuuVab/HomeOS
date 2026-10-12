@@ -121,6 +121,8 @@ try {
     New-Item -ItemType Directory -Path 'bin' -Force | Out-Null
     & go.exe build -o 'bin\homeos.exe' ./cmd/homeos
     if ($LASTEXITCODE -ne 0) { throw 'Backend build failed.' }
+    & go.exe build -o 'bin\homeos-sync.exe' ./cmd/homeos-sync
+    if ($LASTEXITCODE -ne 0) { throw 'HomeDrive sync client build failed.' }
 } finally { Pop-Location }
 
 $env:HOMEOS_DATABASE_URL = 'postgres://homeos_app@127.0.0.1:5432/homeos?sslmode=disable'
