@@ -11,6 +11,8 @@ import (
 	"path"
 )
 
+var ErrBlobUnavailable = errors.New("committed blob unavailable")
+
 func validChecksum(checksum string) bool {
 	if len(checksum) != 64 {
 		return false
@@ -90,12 +92,12 @@ func (s *Store) OpenBlob(checksum string, size int64) (*os.File, error) {
 	defer s.mu.Unlock()
 	file, err := s.root.Open(path.Join(versionsDir, checksum))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrBlobUnavailable, err)
 	}
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() != size {
 		file.Close()
-		return nil, fmt.Errorf("committed blob %s is missing or invalid", checksum)
+		return nil, fmt.Errorf("%w: committed blob %s is missing or invalid", ErrBlobUnavailable, checksum)
 	}
 	return file, nil
 }

@@ -161,4 +161,20 @@ func TestCatalogHTTPRoundTripPostgres(t *testing.T) {
 	if result := call("GET", "/api/v1/drive/files?path=docs%2Fchunk.txt", "", "", cookie, ""); result.Code != 200 || result.Body.String() != string(chunk) {
 		t.Fatalf("resumable download %d: %q", result.Code, result.Body.String())
 	}
+	committed, err := db.FileEntry(1, "docs/chunk.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, ".homeos-versions", committed.Checksum)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "chunk.txt"), []byte("uncommitted"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if result := call("GET", "/api/v1/drive/files?path=docs%2Fchunk.txt", "", "", cookie, ""); result.Code != 500 || strings.Contains(result.Body.String(), "uncommitted") {
+		t.Fatalf("missing blob read did not fail closed: %d %q", result.Code, result.Body.String())
+	}
 }

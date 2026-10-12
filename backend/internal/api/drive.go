@@ -582,6 +582,8 @@ func rpcFileError(err error) error {
 
 func driveError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, drive.ErrBlobUnavailable):
+		writeError(w, http.StatusInternalServerError, "storage_error", "Committed file content is unavailable")
 	case errors.Is(err, drive.ErrInvalidPath):
 		writeError(w, http.StatusBadRequest, "invalid_path", "Invalid drive path")
 	case errors.Is(err, os.ErrNotExist):
