@@ -32,3 +32,9 @@ func TestInitScanAndStatusWithoutServer(t *testing.T) {
 		t.Fatalf("pending=%+v err=%v", pending, err)
 	}
 }
+
+func TestWatchRejectsFastPolling(t *testing.T) {
+	if err := run([]string{"watch", t.TempDir(), "--interval", "1s"}); err == nil {
+		t.Fatal("watch accepted a one-second polling interval")
+	}
+}
