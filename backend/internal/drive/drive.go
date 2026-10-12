@@ -522,6 +522,76 @@ func (s *Store) Upload(path string, reader io.Reader) error {
 	return nil
 }
 
+// Replace atomically stages new bytes for an existing regular file. The
+// caller must enforce the catalog revision precondition before invoking it.
+func (s *Store) Replace(path string, reader io.Reader) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.isPending(path) {
+		return ErrInvalidPath
+	}
+	target, err := s.resolve(path, false)
+	if err != nil {
+		return err
+	}
+	before, err := s.root.Lstat(target)
+	if err != nil {
+		return err
+	}
+	if !before.Mode().IsRegular() {
+		return ErrInvalidPath
+	}
+	usage, err := s.usageLocked()
+	if err != nil {
+		return err
+	}
+	available := usage.QuotaBytes - usage.UsedBytes - usage.ReservedBytes + before.Size()
+	if available < 0 {
+		return ErrQuotaExceeded
+	}
+	limit := s.maxFileBytes
+	if available < limit {
+		limit = available
+	}
+	if err := s.ensureStage(); err != nil {
+		return err
+	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return err
+	}
+	staging := stagePath(hex.EncodeToString(random[:]))
+	file, err := s.root.OpenFile(staging, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer s.root.Remove(staging)
+	written, copyErr := io.Copy(file, io.LimitReader(reader, limit+1))
+	if copyErr != nil {
+		file.Close()
+		return copyErr
+	}
+	if written > limit {
+		file.Close()
+		if available < s.maxFileBytes {
+			return ErrQuotaExceeded
+		}
+		return ErrTooLarge
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	after, err := s.root.Lstat(target)
+	if err != nil || !after.Mode().IsRegular() || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+		return ErrInvalidPath
+	}
+	return s.root.Rename(staging, target)
+}
+
 func (s *Store) Open(path string) (*os.File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
