@@ -117,6 +117,20 @@ func (s *State) SaveBaseline(item Baseline) error {
 	return tx.Commit()
 }
 
+func (s *State) RemoveBaseline(path string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"files", "pending", "conflicts"} {
+		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE path=?`, path); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *State) Queue(item Pending) error {
 	if item.Path == "" || (item.Operation != "create" && item.Operation != "update" && item.Operation != "delete") {
 		return errors.New("invalid pending operation")
