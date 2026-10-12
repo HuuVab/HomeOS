@@ -75,3 +75,32 @@ func TestPruneVersionBlobsKeepsReferencedBytes(t *testing.T) {
 		t.Fatalf("unreferenced blob remains: %v", err)
 	}
 }
+
+func TestReplaceStagesBytesWithoutLosingOriginalOnFailure(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "files")
+	files, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	if err := files.Upload("note.txt", strings.NewReader("first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.SetLimits(6, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Replace("note.txt", strings.NewReader("too-long")); err != ErrTooLarge {
+		t.Fatalf("oversized replacement = %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "note.txt"))
+	if err != nil || string(got) != "first" {
+		t.Fatalf("original changed after failure: %q, %v", got, err)
+	}
+	if err := files.Replace("note.txt", strings.NewReader("second")); err != nil {
+		t.Fatal(err)
+	}
+	got, err = os.ReadFile(filepath.Join(root, "note.txt"))
+	if err != nil || string(got) != "second" {
+		t.Fatalf("replacement = %q, %v", got, err)
+	}
+}
