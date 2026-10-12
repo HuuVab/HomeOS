@@ -226,14 +226,82 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 		queuedNames = append(queuedNames, name)
 	}
 	sort.Slice(queuedNames, func(i, j int) bool {
+		deleteI, deleteJ := pending[queuedNames[i]].Operation == "delete", pending[queuedNames[j]].Operation == "delete"
+		if deleteI != deleteJ {
+			return !deleteI
+		}
 		depthI, depthJ := pathDepth(queuedNames[i]), pathDepth(queuedNames[j])
 		if depthI != depthJ {
+			if deleteI {
+				return depthI > depthJ
+			}
 			return depthI < depthJ
 		}
 		return queuedNames[i] < queuedNames[j]
 	})
 	for _, name := range queuedNames {
 		item := pending[name]
+		if item.Operation == "delete" {
+			if _, exists := local[name]; exists {
+				if err := state.MarkConflict(name, "local item reappeared before deletion could sync"); err != nil {
+					return report, err
+				}
+				report.Conflicts++
+				continue
+			}
+			entry, exists := server[name]
+			if !exists {
+				if err := state.RemoveBaseline(name); err != nil {
+					return report, err
+				}
+				continue
+			}
+			if entry.Version != item.BaseVersion {
+				if err := state.MarkConflict(name, "remote version changed before local deletion synced"); err != nil {
+					return report, err
+				}
+				report.Conflicts++
+				continue
+			}
+			if entry.Kind == "folder" {
+				containsRemoteChild := false
+				for child := range server {
+					if strings.HasPrefix(child, name+"/") {
+						containsRemoteChild = true
+						break
+					}
+				}
+				if containsRemoteChild {
+					if err := state.MarkConflict(name, "remote folder contains files not deleted locally"); err != nil {
+						return report, err
+					}
+					report.Conflicts++
+					continue
+				}
+			}
+			if item.NextAttempt > time.Now().Unix() {
+				continue
+			}
+			if err := remote.Trash(ctx, name, item.BaseVersion); err != nil {
+				if strings.Contains(err.Error(), "HTTP 412") {
+					if markErr := state.MarkConflict(name, "remote version changed during deletion"); markErr != nil {
+						return report, markErr
+					}
+					report.Conflicts++
+				} else if retryErr := state.Retry(name, err); retryErr != nil {
+					return report, retryErr
+				} else {
+					report.Retried++
+				}
+				continue
+			}
+			if err := state.RemoveBaseline(name); err != nil {
+				return report, err
+			}
+			delete(server, name)
+			report.Deleted++
+			continue
+		}
 		if _, exists := server[name]; exists {
 			continue
 		}
