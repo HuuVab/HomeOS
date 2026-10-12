@@ -22,6 +22,25 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
     Start-Sleep -Seconds 2
 }
 if (-not $ready) { throw 'PostgreSQL 17 did not become ready on 127.0.0.1:5432' }
+$redisSocket = [Net.Sockets.TcpClient]::new()
+try {
+    $connect = $redisSocket.BeginConnect('127.0.0.1', 6379, $null, $null)
+    if ($connect.AsyncWaitHandle.WaitOne(1000)) {
+        try {
+            $redisSocket.EndConnect($connect)
+            $env:HOMEOS_REDIS_URL = 'redis://127.0.0.1:6379/0'
+            Write-Host 'HomeOS Redis acceleration enabled on 127.0.0.1:6379.'
+        } catch {
+            Remove-Item Env:HOMEOS_REDIS_URL -ErrorAction SilentlyContinue
+            Write-Host 'Redis is unavailable; HomeOS will use PostgreSQL-only metadata reads.'
+        }
+    } else {
+        Remove-Item Env:HOMEOS_REDIS_URL -ErrorAction SilentlyContinue
+        Write-Host 'Redis is unavailable; HomeOS will use PostgreSQL-only metadata reads.'
+    }
+} finally {
+    $redisSocket.Dispose()
+}
 $binary = Join-Path $backend 'bin\homeos.exe'
 Push-Location $backend
 try {
