@@ -76,3 +76,53 @@ func (s *Store) SnapshotFile(name string) (string, error) {
 	}
 	return checksum, nil
 }
+
+// RestoreVersion verifies the archived bytes before replacing the live file.
+func (s *Store) RestoreVersion(name, checksum string, size int64) error {
+	if len(checksum) != 64 || size < 0 {
+		return ErrInvalidPath
+	}
+	for _, char := range checksum {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return ErrInvalidPath
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	resolved, err := s.resolve(name, false)
+	if err != nil {
+		return err
+	}
+	info, err := s.root.Lstat(resolved)
+	if err != nil || !info.Mode().IsRegular() {
+		return ErrInvalidPath
+	}
+	archive, err := s.root.Open(path.Join(versionsDir, checksum))
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return err
+	}
+	temp := path.Join(path.Dir(resolved), ".homeos-restore-"+hex.EncodeToString(random[:]))
+	output, err := s.root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	defer s.root.Remove(temp)
+	hash := sha256.New()
+	count, copyErr := io.Copy(io.MultiWriter(output, hash), archive)
+	closeErr := output.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if count != size || hex.EncodeToString(hash.Sum(nil)) != checksum {
+		return fmt.Errorf("file version checksum mismatch")
+	}
+	return s.root.Rename(temp, resolved)
+}
