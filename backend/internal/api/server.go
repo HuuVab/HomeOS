@@ -55,6 +55,27 @@ func newHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			writeError(w, http.StatusInternalServerError, "storage_error", "Storage unavailable")
 			return
 		}
+		if db.AuthoritativeMetadata() {
+			format, err := db.StorageFormat(user.ID)
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive storage format is unavailable")
+				return
+			}
+			if format == "blobs" {
+				catalogMux := http.NewServeMux()
+				registerCatalogDriveRoutes(catalogMux, db, userFiles, user.ID)
+				if r.Method != http.MethodGet && r.Method != http.MethodHead {
+					db.LockDriveMutations()
+					defer db.UnlockDriveMutations()
+				}
+				catalogMux.ServeHTTP(w, r)
+				return
+			}
+			if format != "legacy" {
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive storage format is invalid")
+				return
+			}
+		}
 		reconcile := func() error {
 			entries, err := userFiles.AllEntries()
 			if err != nil {
