@@ -72,6 +72,9 @@ func (s *Store) SnapshotFile(name string) (string, error) {
 	defer s.root.Remove(temp)
 	copyHash := sha256.New()
 	copied, copyErr := io.Copy(io.MultiWriter(target, copyHash), source)
+	if copyErr == nil {
+		copyErr = target.Sync()
+	}
 	closeErr := target.Close()
 	if copyErr != nil {
 		return "", copyErr
@@ -126,6 +129,9 @@ func (s *Store) RestoreVersion(name, checksum string, size int64) error {
 	defer s.root.Remove(temp)
 	hash := sha256.New()
 	count, copyErr := io.Copy(io.MultiWriter(output, hash), archive)
+	if copyErr == nil {
+		copyErr = output.Sync()
+	}
 	closeErr := output.Close()
 	if copyErr != nil {
 		return copyErr
