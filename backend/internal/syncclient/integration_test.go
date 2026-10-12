@@ -115,4 +115,39 @@ func TestPostgresDesktopSyncThroughHomeOSAPI(t *testing.T) {
 	if err != nil || string(data) != "server file" {
 		t.Fatalf("downloaded data=%q err=%v", data, err)
 	}
+	if err := remote.CreateFolder(context.Background(), "shared"); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.UploadNew(context.Background(), "shared/remote.txt", strings.NewReader("remote choice")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(localRoot, "shared"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localRoot, "shared", "local.txt"), []byte("local choice"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.MarkConflict("shared", "folder diverged"); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncclient.ResolveFolderConflict(context.Background(), localRoot, state, remote, "shared", "keep-remote"); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(filepath.Join(localRoot, "shared", "remote.txt"))
+	if err != nil || string(data) != "remote choice" {
+		t.Fatalf("remote folder choice %q: %v", data, err)
+	}
+	if err := os.WriteFile(filepath.Join(localRoot, "shared", "local.txt"), []byte("local choice"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.MarkConflict("shared", "folder diverged again"); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncclient.ResolveFolderConflict(context.Background(), localRoot, state, remote, "shared", "keep-local"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := remote.ListAll(context.Background())
+	if err != nil || entries["shared/local.txt"].Kind != "file" {
+		t.Fatalf("local folder choice %+v: %v", entries, err)
+	}
 }
