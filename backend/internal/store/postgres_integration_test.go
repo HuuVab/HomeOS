@@ -119,6 +119,36 @@ func TestPostgresMetadataIntegration(t *testing.T) {
 	if err != nil || storedUpload.Offset != 2 {
 		t.Fatalf("upload = %+v, %v", storedUpload, err)
 	}
+	beforePrune, err := db.FileVersions(1, "docs/note.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []int64{20, 21} {
+		checksum := strings.Repeat("c", 64)
+		if version == 21 {
+			checksum = strings.Repeat("d", 64)
+		}
+		if _, err := db.db.Exec(`INSERT INTO file_versions (owner_id, path, version, size, checksum, storage_path, created_at)
+			VALUES (1, 'docs/note.txt', $1, 4, $2, $3, 1)`, version, checksum, ".homeos-versions/"+checksum); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.db.Exec(`INSERT INTO file_versions (owner_id, path, version, size, checksum, storage_path, created_at)
+		VALUES (1, 'deleted.txt', 1, 4, $1, $2, 1)`, strings.Repeat("f", 64), ".homeos-versions/"+strings.Repeat("f", 64)); err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := db.PruneFileVersions(1, 2, 1)
+	if err != nil || pruned != 2 {
+		t.Fatalf("pruned versions = %d, %v", pruned, err)
+	}
+	versions, err = db.FileVersions(1, "docs/note.txt")
+	if err != nil || len(versions) != len(beforePrune)+1 || versions[0].Version != 21 {
+		t.Fatalf("retained versions = %+v, %v", versions, err)
+	}
+	references, err := db.ReferencedVersionChecksums(1)
+	if err != nil || !references[strings.Repeat("d", 64)] || references[strings.Repeat("f", 64)] {
+		t.Fatalf("retained checksums = %+v, %v", references, err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
