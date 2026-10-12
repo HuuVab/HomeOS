@@ -12,8 +12,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -58,6 +60,12 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 	if err != nil {
 		return report, err
 	}
+	localCaseFolded := make(map[string]string, len(local))
+	if runtime.GOOS == "windows" {
+		for name := range local {
+			localCaseFolded[strings.ToLower(name)] = name
+		}
+	}
 	baselines, err := state.Baselines()
 	if err != nil {
 		return report, err
@@ -92,6 +100,15 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 	})
 	for _, name := range names {
 		entry := server[name]
+		if runtime.GOOS == "windows" {
+			if other := localCaseFolded[strings.ToLower(name)]; other != "" && other != name {
+				if err := state.MarkConflict(other, "local filename differs only by case from a remote item"); err != nil {
+					return report, err
+				}
+				report.Conflicts++
+				continue
+			}
+		}
 		current, exists := local[name]
 		baseline, known := baselines[name]
 		if queued, hasPending := pending[name]; hasPending {

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -132,6 +133,7 @@ func (r *Remote) ListAll(ctx context.Context) (map[string]RemoteEntry, error) {
 		return nil, errors.New("login required")
 	}
 	result := make(map[string]RemoteEntry)
+	caseFolded := make(map[string]string)
 	folders := []string{""}
 	for len(folders) > 0 {
 		folder := folders[0]
@@ -156,6 +158,13 @@ func (r *Remote) ListAll(ctx context.Context) (map[string]RemoteEntry, error) {
 			}
 			if _, exists := result[entry.Path]; exists {
 				return nil, fmt.Errorf("server repeated path %q", entry.Path)
+			}
+			if runtime.GOOS == "windows" {
+				folded := strings.ToLower(entry.Path)
+				if other := caseFolded[folded]; other != "" && other != entry.Path {
+					return nil, fmt.Errorf("server paths %q and %q collide on Windows", other, entry.Path)
+				}
+				caseFolded[folded] = entry.Path
 			}
 			result[entry.Path] = entry
 			if len(result) > 10000 {
