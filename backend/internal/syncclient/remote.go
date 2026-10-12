@@ -144,21 +144,11 @@ func (r *Remote) ListAll(ctx context.Context) (map[string]RemoteEntry, error) {
 	for len(folders) > 0 {
 		folder := folders[0]
 		folders = folders[1:]
-		parameters := url.Values{}
-		if folder != "" {
-			parameters.Set("path", folder)
-		}
-		response, err := r.request(ctx, http.MethodGet, "/api/v1/drive", parameters, nil, "")
+		entries, err := r.ListFolder(ctx, folder)
 		if err != nil {
 			return nil, err
 		}
-		var page struct {
-			Entries []RemoteEntry `json:"entries"`
-		}
-		if err := readJSON(response, &page); err != nil {
-			return nil, err
-		}
-		for _, entry := range page.Entries {
+		for _, entry := range entries {
 			if !validPath(entry.Path) || path.Dir(entry.Path) != folder && !(folder == "" && !strings.Contains(entry.Path, "/")) || (entry.Kind != "file" && entry.Kind != "folder") || entry.Version < 1 {
 				return nil, fmt.Errorf("server returned an unsafe file entry: %q", entry.Path)
 			}
@@ -182,6 +172,23 @@ func (r *Remote) ListAll(ctx context.Context) (map[string]RemoteEntry, error) {
 		}
 	}
 	return result, nil
+}
+
+func (r *Remote) ListFolder(ctx context.Context, folder string) ([]RemoteEntry, error) {
+	if r.owner < 1 { return nil, errors.New("login required") }
+	if folder != "" && !validPath(folder) { return nil, errors.New("unsafe folder path") }
+	parameters := url.Values{}
+	if folder != "" { parameters.Set("path", folder) }
+	response, err := r.request(ctx, http.MethodGet, "/api/v1/drive", parameters, nil, "")
+	if err != nil { return nil, err }
+	var page struct { Entries []RemoteEntry `json:"entries"` }
+	if err := readJSON(response, &page); err != nil { return nil, err }
+	for _, entry := range page.Entries {
+		if !validPath(entry.Path) || path.Dir(entry.Path) != folder && !(folder == "" && !strings.Contains(entry.Path, "/")) || (entry.Kind != "file" && entry.Kind != "folder") || entry.Version < 1 {
+			return nil, fmt.Errorf("server returned an unsafe file entry: %q", entry.Path)
+		}
+	}
+	return page.Entries, nil
 }
 
 func (r *Remote) Changes(ctx context.Context, after int64) ([]Change, int64, error) {
