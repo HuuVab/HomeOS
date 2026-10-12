@@ -228,3 +228,48 @@ func (r *Remote) UploadNew(ctx context.Context, name string, body io.Reader) err
 	}
 	return nil
 }
+
+func (r *Remote) UploadUpdated(ctx context.Context, name string, version int64, body io.Reader) error {
+	if version < 1 {
+		return errors.New("expected a positive source version")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut, r.endpoint("/api/v1/drive/files", url.Values{"path": {name}}), body)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-CSRF-Token", r.csrf)
+	request.Header.Set("X-Source-Version", strconv.FormatInt(version, 10))
+	response, err := r.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("update %q: HTTP %d", name, response.StatusCode)
+	}
+	return nil
+}
+
+func (r *Remote) Trash(ctx context.Context, name string, version int64) error {
+	if version < 1 {
+		return errors.New("expected a positive source version")
+	}
+	data, _ := json.Marshal(map[string]string{"path": name})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint("/api/v1/drive/trash", nil), bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-CSRF-Token", r.csrf)
+	request.Header.Set("X-Source-Version", strconv.FormatInt(version, 10))
+	response, err := r.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("trash %q: HTTP %d", name, response.StatusCode)
+	}
+	return nil
+}
