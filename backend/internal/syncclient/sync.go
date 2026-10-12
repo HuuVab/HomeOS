@@ -95,6 +95,12 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 		current, exists := local[name]
 		baseline, known := baselines[name]
 		if queued, hasPending := pending[name]; hasPending {
+			if queued.Operation == "create" && exists && current.Kind == "folder" && entry.Kind == "folder" {
+				if err := state.SaveBaseline(Baseline{Path: name, Kind: "folder", RemoteVersion: entry.Version}); err != nil {
+					return report, err
+				}
+				continue
+			}
 			reason := "local and remote changes need manual resolution"
 			if queued.Operation == "update" && entry.Version == queued.BaseVersion {
 				reason = "remote overwrite is not supported by this prototype"
@@ -115,6 +121,13 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 			continue
 		}
 		if known && baseline.RemoteVersion == entry.Version && exists {
+			continue
+		}
+		if known && exists && entry.Kind == "file" {
+			if err := state.MarkConflict(name, "remote version changed; local overwrite is not automatic"); err != nil {
+				return report, err
+			}
+			report.Conflicts++
 			continue
 		}
 		if entry.Kind == "folder" {
