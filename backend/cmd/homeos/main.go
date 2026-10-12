@@ -163,6 +163,41 @@ func main() {
 		fmt.Println("HomeDrive snapshot imported.")
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "drive-repair" {
+		if databaseURL == "" || len(os.Args) < 3 || len(os.Args) > 4 || (len(os.Args) == 4 && os.Args[3] != "--apply") {
+			log.Fatal("usage: set HOMEOS_DATABASE_URL, then homeos drive-repair <owner-id> [--apply]")
+		}
+		ownerID, parseErr := strconv.ParseInt(os.Args[2], 10, 64)
+		if parseErr != nil || ownerID < 1 {
+			log.Fatal("owner-id must be a positive integer")
+		}
+		files, err := drive.New(filepath.Join(dataDir, "files"))
+		if err != nil {
+			log.Fatal("open HomeDrive: ", err)
+		}
+		defer files.Close()
+		userFiles, err := files.ForUser(ownerID)
+		if err != nil {
+			log.Fatal("open owner files: ", err)
+		}
+		entries, err := userFiles.AllEntries()
+		if err != nil {
+			log.Fatal("scan owner files: ", err)
+		}
+		apply := len(os.Args) == 4
+		report, err := db.RepairDriveCatalog(ownerID, entries, apply)
+		fmt.Printf("Owner %d: %d entries, %d missing on disk, %d missing in catalog, %d mismatched, %d missing checksums\n",
+			ownerID, report.Entries, report.MissingOnDisk, report.MissingInCatalog, report.Mismatched, report.MissingChecksums)
+		if err != nil {
+			log.Fatal("repair refused: ", err)
+		}
+		if apply {
+			fmt.Println("Catalog checksums and version snapshots backfilled. Restart the server before editing files.")
+		} else {
+			fmt.Println("Dry run only. Stop the server, back up PostgreSQL and HomeDrive files, then re-run with --apply.")
+		}
+		return
+	}
 
 	if len(os.Args) > 1 && (os.Args[1] == "create-admin" || os.Args[1] == "create-user" || os.Args[1] == "reset-admin-password") {
 		if len(os.Args) != 3 || !validUsername.MatchString(os.Args[2]) {
