@@ -335,6 +335,20 @@ func main() {
 		}
 	}
 	retention := time.Duration(retentionDays) * 24 * time.Hour
+	versionDays := 90
+	if configured := os.Getenv("HOMEOS_VERSION_RETENTION_DAYS"); configured != "" {
+		versionDays, err = strconv.Atoi(configured)
+		if err != nil || versionDays < 1 {
+			log.Fatal("HOMEOS_VERSION_RETENTION_DAYS must be a positive integer")
+		}
+	}
+	versionKeep := 10
+	if configured := os.Getenv("HOMEOS_VERSION_MIN_KEEP"); configured != "" {
+		versionKeep, err = strconv.Atoi(configured)
+		if err != nil || versionKeep < 1 {
+			log.Fatal("HOMEOS_VERSION_MIN_KEEP must be a positive integer")
+		}
+	}
 	cleanup := func() {
 		if !db.AuthoritativeMetadata() {
 			if _, err := files.PurgeExpired(retention, time.Now()); err != nil {
@@ -377,6 +391,36 @@ func main() {
 			}
 			if err != nil {
 				log.Printf("HomeDrive Trash cleanup for user %d: %v", ownerID, err)
+			}
+		}
+		allOwners, err := db.UserIDs()
+		if err != nil {
+			log.Printf("list HomeDrive version owners: %v", err)
+			return
+		}
+		cutoff := time.Now().Add(-time.Duration(versionDays) * 24 * time.Hour).Unix()
+		for _, ownerID := range allOwners {
+			userFiles, err := files.ForUser(ownerID)
+			if err == nil {
+				var pruned int
+				pruned, err = db.PruneFileVersions(ownerID, cutoff, versionKeep)
+				if pruned > 0 {
+					log.Printf("HomeDrive pruned %d old versions for user %d", pruned, ownerID)
+				}
+			}
+			var referenced map[string]bool
+			if err == nil {
+				referenced, err = db.ReferencedVersionChecksums(ownerID)
+			}
+			if err == nil {
+				var removed int
+				removed, err = userFiles.PruneVersionBlobs(referenced)
+				if removed > 0 {
+					log.Printf("HomeDrive removed %d unreferenced version blobs for user %d", removed, ownerID)
+				}
+			}
+			if err != nil {
+				log.Printf("HomeDrive version cleanup for user %d: %v", ownerID, err)
 			}
 		}
 	}
