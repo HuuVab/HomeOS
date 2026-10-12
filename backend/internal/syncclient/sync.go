@@ -84,10 +84,11 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 	for _, item := range pendingList {
 		pending[item.Path] = item
 	}
-	server, err := remote.ListAll(ctx)
+	server, catalogCursor, err := remoteCatalog(ctx, state, remote)
 	if err != nil {
 		return report, err
 	}
+	report.Cursor = catalogCursor
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return report, err
@@ -431,32 +432,6 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 			report.Folders++
 		} else {
 			report.Uploaded++
-		}
-	}
-	cursorText, err := state.Meta("cursor")
-	if err != nil {
-		return report, err
-	}
-	if cursorText != "" {
-		report.Cursor, err = strconv.ParseInt(cursorText, 10, 64)
-		if err != nil {
-			return report, err
-		}
-	}
-	for page := 0; page < 100; page++ {
-		changes, next, err := remote.Changes(ctx, report.Cursor)
-		if err != nil {
-			return report, err
-		}
-		if next == report.Cursor || len(changes) == 0 {
-			break
-		}
-		report.Cursor = next
-		if err := state.SetMeta("cursor", strconv.FormatInt(next, 10)); err != nil {
-			return report, err
-		}
-		if len(changes) < 100 {
-			break
 		}
 	}
 	return report, nil

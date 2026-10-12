@@ -81,12 +81,16 @@ func OpenState(root string) (*State, error) {
 
 func (s *State) RemoteEntries() (map[string]RemoteEntry, error) {
 	rows, err := s.db.Query(`SELECT path,kind,size,version FROM remote_entries`)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	entries := make(map[string]RemoteEntry)
 	for rows.Next() {
 		var entry RemoteEntry
-		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &entry.Version); err != nil { return nil, err }
+		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &entry.Version); err != nil {
+			return nil, err
+		}
 		entries[entry.Path] = entry
 	}
 	return entries, rows.Err()
@@ -94,13 +98,21 @@ func (s *State) RemoteEntries() (map[string]RemoteEntry, error) {
 
 func (s *State) SaveRemoteEntries(entries map[string]RemoteEntry, cursor int64) error {
 	tx, err := s.db.Begin()
-	if err != nil { return err }
-	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM remote_entries`); err != nil { return err }
-	for _, entry := range entries {
-		if _, err := tx.Exec(`INSERT INTO remote_entries(path,kind,size,version) VALUES(?,?,?,?)`, entry.Path, entry.Kind, entry.Size, entry.Version); err != nil { return err }
+	if err != nil {
+		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('cursor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fmt.Sprint(cursor)); err != nil { return err }
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM remote_entries`); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if _, err := tx.Exec(`INSERT INTO remote_entries(path,kind,size,version) VALUES(?,?,?,?)`, entry.Path, entry.Kind, entry.Size, entry.Version); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('cursor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fmt.Sprint(cursor)); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
