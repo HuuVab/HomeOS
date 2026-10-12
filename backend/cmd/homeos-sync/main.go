@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -40,6 +43,9 @@ func run(arguments []string) error {
 	interval := flags.Duration("interval", 30*time.Second, "polling interval for watch mode")
 	conflictPath := flags.String("path", "", "conflicting file path for resolve mode")
 	choice := flags.String("choice", "", "keep-local or keep-remote for resolve mode")
+	folder := flags.Bool("folder", false, "resolve a folder and its descendants")
+	passwordStdin := flags.Bool("password-stdin", false, "read one password line from standard input")
+	jsonStatus := flags.Bool("json", false, "write status as JSON")
 	if err := flags.Parse(arguments[2:]); err != nil {
 		return err
 	}
@@ -67,6 +73,9 @@ func run(arguments []string) error {
 		}
 	}
 	if command == "status" || command == "scan" {
+		if *jsonStatus {
+			return printJSONStatus(state)
+		}
 		return printStatus(state)
 	}
 	if *username == "" {
@@ -78,12 +87,18 @@ func run(arguments []string) error {
 	if strings.TrimSpace(*username) == "" {
 		return errors.New("username is required")
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !*passwordStdin && !term.IsTerminal(int(os.Stdin.Fd())) {
 		return errors.New("sync requires an interactive terminal for password entry")
 	}
-	fmt.Print("HomeOS password: ")
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println()
+	var password []byte
+	if *passwordStdin {
+		password, err = bufio.NewReader(io.LimitReader(os.Stdin, 4096)).ReadBytes('\n')
+		password = []byte(strings.TrimRight(string(password), "\r\n"))
+	} else {
+		fmt.Print("HomeOS password: ")
+		password, err = term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+	}
 	if err != nil {
 		return err
 	}
@@ -101,10 +116,16 @@ func run(arguments []string) error {
 	if command == "resolve" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		if err := syncclient.ResolveFileConflict(ctx, absolute, state, remote, *conflictPath, *choice); err != nil {
+		var err error
+		if *folder {
+			err = syncclient.ResolveFolderConflict(ctx, absolute, state, remote, *conflictPath, *choice)
+		} else {
+			err = syncclient.ResolveFileConflict(ctx, absolute, state, remote, *conflictPath, *choice)
+		}
+		if err != nil {
 			return err
 		}
-		fmt.Printf("Resolved file conflict for %s using %s.\n", *conflictPath, *choice)
+		fmt.Printf("Resolved conflict for %s using %s.\n", *conflictPath, *choice)
 		return printStatus(state)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -133,6 +154,18 @@ func run(arguments []string) error {
 		case <-time.After(*interval):
 		}
 	}
+}
+
+func printJSONStatus(state *syncclient.State) error {
+	pending, err := state.Pending()
+	if err != nil {
+		return err
+	}
+	conflicts, err := state.Conflicts()
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"pending": pending, "conflicts": conflicts})
 }
 
 func clear(data []byte) {
