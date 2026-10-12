@@ -70,3 +70,41 @@ func TestScanRejectsSymlinks(t *testing.T) {
 		t.Fatal("expected symlink to be rejected")
 	}
 }
+
+func TestScanCacheTracksMetadataAndPrunesDeletes(t *testing.T) {
+	root := t.TempDir()
+	state, err := OpenState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	name := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(name, []byte("first"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	first, err := ScanLocal(root, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := state.ScanCache()
+	if err != nil || cache["note.txt"].Hash != first["note.txt"].Hash {
+		t.Fatalf("cache %+v: %v", cache, err)
+	}
+	if err := os.WriteFile(name, []byte("a different length"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := ScanLocal(root, state)
+	if err != nil || second["note.txt"].Hash == first["note.txt"].Hash {
+		t.Fatalf("changed scan %+v: %v", second, err)
+	}
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ScanLocal(root, state); err != nil {
+		t.Fatal(err)
+	}
+	cache, err = state.ScanCache()
+	if err != nil || len(cache) != 0 {
+		t.Fatalf("stale cache %+v: %v", cache, err)
+	}
+}

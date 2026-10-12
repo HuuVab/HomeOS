@@ -29,6 +29,11 @@ func ScanLocal(root string, state *State) (map[string]LocalEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	cache, err := state.ScanCache()
+	if err != nil {
+		return nil, err
+	}
+	nextCache := make(map[string]ScanCacheEntry)
 	local := make(map[string]LocalEntry)
 	err = filepath.WalkDir(absolute, func(filename string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -62,27 +67,36 @@ func ScanLocal(root string, state *State) (map[string]LocalEntry, error) {
 			if !info.Mode().IsRegular() {
 				return fmt.Errorf("sync refuses non-regular file: %s", relative)
 			}
-			file, err := os.Open(filename)
-			if err != nil {
-				return err
-			}
-			hash := sha256.New()
-			_, copyErr := io.Copy(hash, file)
-			closeErr := file.Close()
-			if copyErr != nil {
-				return copyErr
-			}
-			if closeErr != nil {
-				return closeErr
+			cached, known := cache[name]
+			if known && cached.Size == info.Size() && cached.ModifiedNS == info.ModTime().UnixNano() {
+				item.Hash = cached.Hash
+			} else {
+				file, err := os.Open(filename)
+				if err != nil {
+					return err
+				}
+				hash := sha256.New()
+				_, copyErr := io.Copy(hash, file)
+				closeErr := file.Close()
+				if copyErr != nil {
+					return copyErr
+				}
+				if closeErr != nil {
+					return closeErr
+				}
+				item.Hash = hex.EncodeToString(hash.Sum(nil))
 			}
 			item.Kind = "file"
-			item.Hash = hex.EncodeToString(hash.Sum(nil))
 			item.Size = info.Size()
+			nextCache[name] = ScanCacheEntry{Size: info.Size(), ModifiedNS: info.ModTime().UnixNano(), Hash: item.Hash}
 		}
 		local[name] = item
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := state.SaveScanCache(nextCache); err != nil {
 		return nil, err
 	}
 	for name, item := range local {

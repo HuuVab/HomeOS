@@ -70,6 +70,7 @@ func OpenState(root string) (*State, error) {
 		`CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, operation TEXT NOT NULL, base_version INTEGER NOT NULL, local_hash TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE IF NOT EXISTS conflicts (path TEXT PRIMARY KEY, reason TEXT NOT NULL, detected_at INTEGER NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS remote_entries (path TEXT PRIMARY KEY, kind TEXT NOT NULL, size INTEGER NOT NULL, version INTEGER NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS local_scan (path TEXT PRIMARY KEY, size INTEGER NOT NULL, modified_ns INTEGER NOT NULL, hash TEXT NOT NULL)`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()
@@ -77,6 +78,47 @@ func OpenState(root string) (*State, error) {
 		}
 	}
 	return &State{db: db}, nil
+}
+
+type ScanCacheEntry struct {
+	Size       int64
+	ModifiedNS int64
+	Hash       string
+}
+
+func (s *State) ScanCache() (map[string]ScanCacheEntry, error) {
+	rows, err := s.db.Query(`SELECT path,size,modified_ns,hash FROM local_scan`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]ScanCacheEntry)
+	for rows.Next() {
+		var name string
+		var item ScanCacheEntry
+		if err := rows.Scan(&name, &item.Size, &item.ModifiedNS, &item.Hash); err != nil {
+			return nil, err
+		}
+		result[name] = item
+	}
+	return result, rows.Err()
+}
+
+func (s *State) SaveScanCache(entries map[string]ScanCacheEntry) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM local_scan`); err != nil {
+		return err
+	}
+	for name, item := range entries {
+		if _, err := tx.Exec(`INSERT INTO local_scan(path,size,modified_ns,hash) VALUES(?,?,?,?)`, name, item.Size, item.ModifiedNS, item.Hash); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *State) RemoteEntries() (map[string]RemoteEntry, error) {
