@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/HuuVab/HomeOS/backend/internal/drive"
 )
 
 func TestCatalogTransactionsPostgres(t *testing.T) {
@@ -113,5 +115,70 @@ func TestCatalogTransactionsPostgres(t *testing.T) {
 	format, err = db.StorageFormat(1)
 	if err != nil || format != "blobs" {
 		t.Fatalf("activated format %q: %v", format, err)
+	}
+	if err := db.CreateUser("legacy_owner", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	files, err := drive.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	legacy, err := files.ForUser(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Upload("keep.txt", strings.NewReader("kept")); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Upload("gone.txt", strings.NewReader("trashed")); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := legacy.AllEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BeginFileMutation(2); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReconcileDriveMutation(2, entries, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Trash("gone.txt"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = legacy.AllEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyTrash, err := legacy.ListTrash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BeginFileMutation(2); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReconcileDriveMutation(2, entries, legacyTrash, nil); err != nil {
+		t.Fatal(err)
+	}
+	report, err := db.MigrateOwnerToBlobs(2, legacy, false)
+	if err != nil || report.ActiveEntries != 1 || report.TrashEntries != 1 || report.TrashNodes != 1 {
+		t.Fatalf("dry migration %+v: %v", report, err)
+	}
+	format, err = db.StorageFormat(2)
+	if err != nil || format != "legacy" {
+		t.Fatalf("dry migration format %q: %v", format, err)
+	}
+	report, err = db.MigrateOwnerToBlobs(2, legacy, true)
+	if err != nil || report.VerifiedBlobs != 2 {
+		t.Fatalf("migration %+v: %v", report, err)
+	}
+	format, err = db.StorageFormat(2)
+	if err != nil || format != "blobs" {
+		t.Fatalf("migrated format %q: %v", format, err)
+	}
+	manifest, err := db.CatalogTrashFiles(2, legacyTrash[0].ID)
+	if err != nil || len(manifest) != 1 || manifest[0].Checksum == "" {
+		t.Fatalf("migrated Trash %+v: %v", manifest, err)
 	}
 }
