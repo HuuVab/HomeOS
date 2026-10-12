@@ -338,3 +338,23 @@ func (s *Store) CatalogRestoreTrash(ownerID int64, id string) error {
 	}
 	return tx.Commit()
 }
+
+func (s *Store) CatalogPurgeExpiredTrash(ownerID, cutoff int64) (int64, error) {
+	tx, err := s.catalogTx(ownerID)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`DELETE FROM trash_entries WHERE owner_id=$1 AND deleted_at<$2`, ownerID, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
