@@ -126,3 +126,49 @@ func (s *Store) RestoreVersion(name, checksum string, size int64) error {
 	}
 	return s.root.Rename(temp, resolved)
 }
+
+// PruneVersionBlobs removes only unreferenced SHA-256-named regular files.
+// The caller must exclude concurrent snapshots until the catalog reference
+// set has been read and this method finishes.
+func (s *Store) PruneVersionBlobs(referenced map[string]bool) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	directory, err := s.root.Open(versionsDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer directory.Close()
+	info, err := directory.Stat()
+	if err != nil || !info.IsDir() {
+		return 0, ErrInvalidPath
+	}
+	items, err := directory.ReadDir(-1)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, item := range items {
+		name := item.Name()
+		if len(name) != 64 || referenced[name] || !item.Type().IsRegular() {
+			continue
+		}
+		valid := true
+		for _, char := range name {
+			if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		if err := s.root.Remove(path.Join(versionsDir, name)); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
