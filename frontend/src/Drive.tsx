@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 
 type Entry = { name: string; path: string; kind: 'file' | 'folder'; size: number; modifiedAt: string; version?: number }
 type TrashEntry = { id: string; path: string; deletedAt: string }
-type StorageUsage = { usedBytes: number; reservedBytes: number; quotaBytes: number; maxFileBytes: number }
+type StorageUsage = { usedBytes: number; reservedBytes: number; quotaBytes: number; maxFileBytes: number; unlimited?: boolean }
 type FileVersion = { version: number; size: number; checksum: string; createdAt: number }
 type Props = { csrfToken: string }
 type SortKey = 'name' | 'date' | 'size' | 'type'
@@ -254,7 +254,7 @@ export default function Drive({ csrfToken }: Props) {
     setBusy(true); setError(null)
     try {
       for (const file of uploads) {
-        if (storage && file.size > storage.maxFileBytes) throw new Error(`${file.name} exceeds the file size limit (${bytes(storage.maxFileBytes)}).`)
+        if (storage && !storage.unlimited && file.size > storage.maxFileBytes) throw new Error(`${file.name} exceeds the file size limit (${bytes(storage.maxFileBytes)}).`)
         setUploadName(file.name)
         const path = folder ? `${folder}/${file.name}` : file.name
         const response = await fetch('/api/v1/drive/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify({ path, size: file.size, fingerprint: await fingerprint(file) }) })
@@ -312,7 +312,7 @@ export default function Drive({ csrfToken }: Props) {
       </div>
     </div>
     {!showTrash && <nav className="drive-breadcrumbs" aria-label="Folder path"><button type="button" onClick={() => navigate('')}>My Drive</button>{folder.split('/').filter(Boolean).map((part, index, parts) => <span key={index}> / <button type="button" onClick={() => navigate(parts.slice(0, index + 1).join('/'))}>{part}</button></span>)}</nav>}
-    {storage && <div className="drive-storage"><span>{bytes(storage.usedBytes)} used of {bytes(storage.quotaBytes)}</span><progress max={storage.quotaBytes} value={Math.min(storage.usedBytes + storage.reservedBytes, storage.quotaBytes)} aria-label="Storage used" /><span>Max file {bytes(storage.maxFileBytes)}</span></div>}
+    {storage && <div className="drive-storage"><span>{bytes(storage.usedBytes)} used{storage.unlimited ? ' · Unlimited storage' : ` of ${bytes(storage.quotaBytes)}`}</span>{!storage.unlimited && <progress max={storage.quotaBytes} value={Math.min(storage.usedBytes + storage.reservedBytes, storage.quotaBytes)} aria-label="Storage used" />}<span>{storage.unlimited ? 'No HomeDrive file-size cap' : `Max file ${bytes(storage.maxFileBytes)}`}</span></div>}
     {uploads.length > 0 && <div className="drive-upload-tray"><span>{uploads.length} file{uploads.length === 1 ? '' : 's'} ready{uploadName ? ` · ${uploadName}` : ''}</span>{progress !== null && <progress max={1} value={progress} aria-label="Upload progress" />}<button type="button" disabled={busy} onClick={() => void uploadFiles()}>{busy ? 'Uploading…' : 'Upload / Resume'}</button>{!busy && <button type="button" className="drive-quiet-button" onClick={() => setUploads([])}>Clear</button>}</div>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {showTrash ? <div className="drive-content"><div className="drive-section-title"><h2>Trash</h2><span>Deleted items are kept for 30 days by default</span></div>{trashEntries.length === 0 ? <p className="drive-empty">Trash is empty.</p> : <div className="drive-trash-list">{trashEntries.map((entry) => <div className="drive-trash-row" key={entry.id}><span className="drive-item-name">/{entry.path}</span><span className="drive-muted">{entry.deletedAt ? modified(entry.deletedAt) : ''}</span><button type="button" disabled={busy} onClick={() => void restore(entry, false)}>Restore</button><button type="button" disabled={busy} onClick={() => void restore(entry, true)}>Delete forever</button></div>)}</div>}</div> : <div className="drive-content">

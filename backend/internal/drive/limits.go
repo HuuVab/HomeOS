@@ -14,6 +14,7 @@ type StorageUsage struct {
 	ReservedBytes int64 `json:"reservedBytes"`
 	QuotaBytes    int64 `json:"quotaBytes"`
 	MaxFileBytes  int64 `json:"maxFileBytes"`
+	Unlimited     bool  `json:"unlimited"`
 }
 
 func (s *Store) SetLimits(maxFileBytes, quotaBytes int64) error {
@@ -23,11 +24,24 @@ func (s *Store) SetLimits(maxFileBytes, quotaBytes int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.maxFileBytes, s.quotaBytes = maxFileBytes, quotaBytes
+	s.defaultMaxFileBytes, s.defaultQuotaBytes = maxFileBytes, quotaBytes
 	for _, child := range s.users {
 		if err := child.SetLimits(maxFileBytes, quotaBytes); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// SetPersonalLimits changes only this owner's limits. In particular owner 1's
+// store is also the parent for other users and must not change their defaults.
+func (s *Store) SetPersonalLimits(maxFileBytes, quotaBytes int64) error {
+	if maxFileBytes < 1 || quotaBytes < maxFileBytes {
+		return ErrInvalidPath
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.maxFileBytes, s.quotaBytes = maxFileBytes, quotaBytes
 	return nil
 }
 

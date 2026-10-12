@@ -58,7 +58,7 @@ func TestCatalogHTTPRoundTripPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateAdmin("catalog_http", hash); err != nil {
+	if err := db.CreateAdmin("admin_0607", hash); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.ActivateBlobStorage(1); err != nil {
@@ -70,6 +70,9 @@ func TestCatalogHTTPRoundTripPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer files.Close()
+	if err := files.SetLimits(4, 5); err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler("", db, testCollector{}, files)
 	call := func(method, resource, body, csrf string, cookie *http.Cookie, version string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -90,7 +93,7 @@ func TestCatalogHTTPRoundTripPostgres(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		return response
 	}
-	login := call("POST", "/api/v1/auth/login", `{"username":"catalog_http","password":"catalog-test-password"}`, "", nil, "")
+	login := call("POST", "/api/v1/auth/login", `{"username":"admin_0607","password":"catalog-test-password"}`, "", nil, "")
 	if login.Code != 200 {
 		t.Fatalf("login %d: %s", login.Code, login.Body.String())
 	}
@@ -100,6 +103,10 @@ func TestCatalogHTTPRoundTripPostgres(t *testing.T) {
 	}
 	if err := json.Unmarshal(login.Body.Bytes(), &session); err != nil {
 		t.Fatal(err)
+	}
+	storage := call("GET", "/api/v1/drive/storage", "", "", cookie, "")
+	if storage.Code != 200 || !strings.Contains(storage.Body.String(), `"unlimited":true`) {
+		t.Fatalf("admin storage policy %d: %s", storage.Code, storage.Body.String())
 	}
 	if result := call("POST", "/api/v1/drive/folders", `{"path":"docs"}`, session.CSRF, cookie, ""); result.Code != 201 {
 		t.Fatalf("folder %d: %s", result.Code, result.Body.String())
@@ -176,5 +183,28 @@ func TestCatalogHTTPRoundTripPostgres(t *testing.T) {
 	}
 	if result := call("GET", "/api/v1/drive/files?path=docs%2Fchunk.txt", "", "", cookie, ""); result.Code != 500 || strings.Contains(result.Body.String(), "uncommitted") {
 		t.Fatalf("missing blob read did not fail closed: %d %q", result.Code, result.Body.String())
+	}
+	if err := db.CreateUser("limited_user", hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ActivateBlobStorage(2); err != nil {
+		t.Fatal(err)
+	}
+	limitedLogin := call("POST", "/api/v1/auth/login", `{"username":"limited_user","password":"catalog-test-password"}`, "", nil, "")
+	if limitedLogin.Code != 200 {
+		t.Fatalf("limited login: %d", limitedLogin.Code)
+	}
+	limitedCookie := limitedLogin.Result().Cookies()[0]
+	var limitedSession struct {
+		CSRF string `json:"csrfToken"`
+	}
+	if err := json.Unmarshal(limitedLogin.Body.Bytes(), &limitedSession); err != nil {
+		t.Fatal(err)
+	}
+	if value := call("GET", "/api/v1/drive/storage", "", "", limitedCookie, ""); value.Code != 200 || strings.Contains(value.Body.String(), `"unlimited":true`) {
+		t.Fatalf("ordinary user storage policy %d: %s", value.Code, value.Body.String())
+	}
+	if value := call("PUT", "/api/v1/drive/files?path=too-large.txt", "larger than four bytes", limitedSession.CSRF, limitedCookie, ""); value.Code != 413 {
+		t.Fatalf("ordinary user bypassed size cap %d: %s", value.Code, value.Body.String())
 	}
 }

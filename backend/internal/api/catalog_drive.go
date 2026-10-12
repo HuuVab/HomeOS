@@ -20,7 +20,7 @@ import (
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
 
-func registerCatalogDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64) {
+func registerCatalogDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64, unlimited bool) {
 	check := func(w http.ResponseWriter, r *http.Request, mutate bool) bool {
 		_, csrf, _, ok := authenticate(w, r, db)
 		if !ok {
@@ -60,7 +60,9 @@ func registerCatalogDriveRoutes(mux *http.ServeMux, db *store.Store, files *driv
 	}
 	usage := func() (drive.StorageUsage, error) {
 		maxFile, quota := files.Limits()
-		return db.CatalogUsage(ownerID, maxFile, quota)
+		value, err := db.CatalogUsage(ownerID, maxFile, quota)
+		value.Unlimited = unlimited
+		return value, err
 	}
 	mux.HandleFunc("GET /api/v1/drive", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, false) {

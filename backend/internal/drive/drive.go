@@ -26,13 +26,15 @@ type TrashEntry struct {
 }
 
 type Store struct {
-	root         *os.Root
-	rootPath     string
-	mu           sync.Mutex
-	pending      map[string]UploadSession
-	users        map[int64]*Store
-	maxFileBytes int64
-	quotaBytes   int64
+	root                *os.Root
+	rootPath            string
+	mu                  sync.Mutex
+	pending             map[string]UploadSession
+	users               map[int64]*Store
+	maxFileBytes        int64
+	quotaBytes          int64
+	defaultMaxFileBytes int64
+	defaultQuotaBytes   int64
 }
 
 type Entry struct {
@@ -61,7 +63,7 @@ func New(root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := &Store{root: opened, rootPath: absolute, pending: make(map[string]UploadSession), users: make(map[int64]*Store), maxFileBytes: 2 << 30, quotaBytes: 20 << 30}
+	store := &Store{root: opened, rootPath: absolute, pending: make(map[string]UploadSession), users: make(map[int64]*Store), maxFileBytes: 2 << 30, quotaBytes: 20 << 30, defaultMaxFileBytes: 2 << 30, defaultQuotaBytes: 20 << 30}
 	if err := store.loadUploads(); err != nil {
 		opened.Close()
 		return nil, err
@@ -102,8 +104,10 @@ func (s *Store) ForUser(id int64) (*Store, error) {
 		return nil, err
 	}
 	s.users[id] = child
-	child.maxFileBytes = s.maxFileBytes
-	child.quotaBytes = s.quotaBytes
+	child.maxFileBytes = s.defaultMaxFileBytes
+	child.quotaBytes = s.defaultQuotaBytes
+	child.defaultMaxFileBytes = s.defaultMaxFileBytes
+	child.defaultQuotaBytes = s.defaultQuotaBytes
 	return child, nil
 }
 

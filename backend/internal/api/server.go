@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,6 +56,14 @@ func newHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			writeError(w, http.StatusInternalServerError, "storage_error", "Storage unavailable")
 			return
 		}
+		unlimitedDrive := user.Role == "admin" && user.Username == "admin_0607"
+		if unlimitedDrive {
+			// Effectively unbounded by HomeOS; the filesystem and int64 remain finite.
+			if err := userFiles.SetPersonalLimits(math.MaxInt64/2, math.MaxInt64/2); err != nil {
+				writeError(w, http.StatusInternalServerError, "storage_error", "Storage unavailable")
+				return
+			}
+		}
 		if db.AuthoritativeMetadata() {
 			format, err := db.StorageFormat(user.ID)
 			if err != nil {
@@ -63,7 +72,7 @@ func newHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			}
 			if format == "blobs" {
 				catalogMux := http.NewServeMux()
-				registerCatalogDriveRoutes(catalogMux, db, userFiles, user.ID)
+				registerCatalogDriveRoutes(catalogMux, db, userFiles, user.ID, unlimitedDrive)
 				if r.Method != http.MethodGet && r.Method != http.MethodHead {
 					db.LockDriveMutations()
 					defer db.UnlockDriveMutations()
@@ -120,7 +129,7 @@ func newHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			}
 		}
 		driveMux := http.NewServeMux()
-		registerDriveRoutes(driveMux, db, userFiles, user.ID, metadataClient)
+		registerDriveRoutes(driveMux, db, userFiles, user.ID, unlimitedDrive, metadataClient)
 		metadataChanged := r.Method == http.MethodPut || r.Method == http.MethodDelete ||
 			(r.Method == http.MethodPost && r.URL.Path != "/api/v1/drive/uploads")
 		if metadataClient != nil && db.AuthoritativeMetadata() && r.Method == http.MethodPost && r.URL.Path == "/api/v1/drive/folders" {

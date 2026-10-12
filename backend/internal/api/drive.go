@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64, metadataClient metadatapb.MetadataServiceClient) {
+func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64, unlimited bool, metadataClient metadatapb.MetadataServiceClient) {
 	fileEntry := func(r *http.Request, name string) (drive.Entry, error) {
 		if metadataClient == nil {
 			return db.FileEntry(ownerID, name)
@@ -128,6 +128,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			driveError(w, err)
 			return
 		}
+		usage.Unlimited = unlimited
 		writeJSON(w, http.StatusOK, usage)
 	})
 	mux.HandleFunc("GET /api/v1/drive/versions", func(w http.ResponseWriter, r *http.Request) {
