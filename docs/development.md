@@ -56,6 +56,8 @@ go run ./cmd/homeos
 
 Open `http://127.0.0.1:8080`.
 
+This checkout's local PostgreSQL deployment can be started with `powershell -File .\scripts\start-homeos-postgres.ps1` from the repository root. It connects as the dedicated `homeos_app` role to the `homeos` database, reads its password from ignored `backend/secrets/postgres-password`, and reuses `backend/data/files`. The old SQLite database is retained only as a rollback backup; existing users must sign in again because sessions were not migrated. PostgreSQL 17 must be running before launching the script.
+
 ## Verify
 
 ```powershell
