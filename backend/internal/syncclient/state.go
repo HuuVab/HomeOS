@@ -44,11 +44,16 @@ func OpenState(root string) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(absolute)
-	if err != nil || !info.IsDir() {
+	info, err := os.Lstat(absolute)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("sync root must be an existing directory: %s", absolute)
 	}
 	directory := filepath.Join(absolute, stateDir)
+	if info, err := os.Lstat(directory); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+		return nil, fmt.Errorf("sync state path must be a directory inside the root: %s", directory)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return nil, err
 	}
