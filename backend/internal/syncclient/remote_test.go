@@ -64,7 +64,8 @@ func TestResumableUploadContinuesAtServerOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	if err := remote.UploadResumable(context.Background(), "large.bin", file, int64(len(contents))); err != nil {
+	fullHash := sha256.Sum256(contents)
+	if err := remote.UploadResumable(context.Background(), "large.bin", file, int64(len(contents)), hex.EncodeToString(fullHash[:])); err != nil {
 		t.Fatal(err)
 	}
 }

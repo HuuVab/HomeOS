@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -280,29 +279,13 @@ func (r *Remote) Trash(ctx context.Context, name string, version int64) error {
 
 // UploadResumable sends large new files in verified chunks. Retrying with the
 // same file resumes the server session by its stable sample fingerprint.
-func (r *Remote) UploadResumable(ctx context.Context, name string, file *os.File, size int64) error {
-	if size < 0 {
-		return errors.New("negative upload size")
+func (r *Remote) UploadResumable(ctx context.Context, name string, file *os.File, size int64, fingerprint string) error {
+	if size < 0 || len(fingerprint) != 64 {
+		return errors.New("invalid resumable upload fingerprint")
 	}
-	sampleSize := int64(64 << 10)
-	if size < sampleSize {
-		sampleSize = size
+	if _, err := hex.DecodeString(fingerprint); err != nil {
+		return errors.New("invalid resumable upload fingerprint")
 	}
-	first := make([]byte, sampleSize)
-	last := make([]byte, sampleSize)
-	if _, err := file.ReadAt(first, 0); err != nil {
-		return err
-	}
-	if _, err := file.ReadAt(last, size-sampleSize); err != nil {
-		return err
-	}
-	hash := sha256.New()
-	hash.Write(first)
-	hash.Write(last)
-	var length [8]byte
-	binary.BigEndian.PutUint64(length[:], uint64(size))
-	hash.Write(length[:])
-	fingerprint := hex.EncodeToString(hash.Sum(nil))
 	payload, _ := json.Marshal(map[string]any{"path": name, "size": size, "fingerprint": fingerprint})
 	response, err := r.request(ctx, http.MethodPost, "/api/v1/drive/uploads", nil, bytes.NewReader(payload), "application/json")
 	if err != nil {

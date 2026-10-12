@@ -21,7 +21,7 @@ import (
 
 const (
 	maxPrototypeFileBytes = 2 << 30
-	resumableThreshold   = 32 << 20
+	resumableThreshold    = 32 << 20
 )
 
 type Report struct {
@@ -406,7 +406,7 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 			file, err = root.Open(filepath.FromSlash(name))
 			if err == nil {
 				if entry.Size > resumableThreshold {
-					err = remote.UploadResumable(ctx, name, file, entry.Size)
+					err = remote.UploadResumable(ctx, name, file, entry.Size, entry.Hash)
 				} else {
 					err = remote.UploadNew(ctx, name, file)
 				}
