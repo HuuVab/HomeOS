@@ -269,6 +269,15 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		if os.Args[1] != "reset-admin-password" && db.IsPostgres() {
+			user, lookupErr := db.UserByUsername(os.Args[2])
+			if lookupErr != nil {
+				log.Fatal(lookupErr)
+			}
+			if err := db.ActivateBlobStorage(user.ID); err != nil {
+				log.Fatal(err)
+			}
+		}
 		fmt.Println("Administrator credentials updated.")
 		return
 	}

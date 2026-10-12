@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+func (s *Store) IsPostgres() bool { return s.dialect == "postgres" }
+
 // StorageFormat defaults to legacy for pre-migration users. No request may
 // infer blob mode just because a directory or a blob happens to exist.
 func (s *Store) StorageFormat(ownerID int64) (string, error) {
