@@ -83,7 +83,7 @@ func (s *Store) RepairDriveCatalog(ownerID int64, entries []drive.Entry, apply b
 	if report.MissingOnDisk != 0 || report.Unverified != 0 {
 		return report, errors.New("missing file bytes or unverified content drift; refusing automatic repair")
 	}
-	if err := s.reconcileEntriesTx(tx, ownerID, entries, false); err != nil {
+	if err := s.reconcileEntriesTx(tx, ownerID, entries, true); err != nil {
 		return report, err
 	}
 	return report, tx.Commit()
