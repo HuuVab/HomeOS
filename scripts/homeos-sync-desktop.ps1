@@ -104,6 +104,21 @@ function Set-Busy([bool]$busy) {
     $keepRemote.Enabled = -not $busy
     $refreshButton.Enabled = -not $busy
 }
+function Quote-Argument([string]$value) {
+    # CommandLineToArgvW quoting: double backslashes before quotes and at end.
+    $quoted = '"'
+    $slashes = 0
+    foreach ($character in $value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') {
+            $quoted += ('\' * ($slashes * 2 + 1)) + '"'
+        } else {
+            $quoted += ('\' * $slashes) + $character
+        }
+        $slashes = 0
+    }
+    return $quoted + ('\' * ($slashes * 2)) + '"'
+}
 function Refresh-Conflicts {
     $grid.Rows.Clear()
     if (-not (Test-Path -LiteralPath $folder.Text -PathType Container)) { return }
@@ -112,7 +127,9 @@ function Refresh-Conflicts {
         if ($LASTEXITCODE -ne 0) { throw [string]::Join("`n", $json) }
         $status = ([string]::Join("`n", $json) | ConvertFrom-Json)
         foreach ($item in $status.conflicts) { [void]$grid.Rows.Add($item.Path, $item.Reason) }
-        $log.AppendText("Pending: $(@($status.pending).Count); conflicts: $(@($status.conflicts).Count).`r`n")
+        $pendingCount = if ($null -eq $status.pending) { 0 } else { @($status.pending).Count }
+        $conflictCount = if ($null -eq $status.conflicts) { 0 } else { @($status.conflicts).Count }
+        $log.AppendText("Pending: $pendingCount; conflicts: $conflictCount.`r`n")
     } catch { $log.AppendText("Status error: $_`r`n") }
 }
 function Start-Client([string[]]$arguments) {
@@ -132,7 +149,7 @@ function Start-Client([string[]]$arguments) {
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
     $info.CreateNoWindow = $true
-    $quoted = foreach ($value in $arguments) { '"' + $value.Replace('"', '\"') + '"' }
+    $quoted = foreach ($value in $arguments) { Quote-Argument $value }
     $info.Arguments = [string]::Join(' ', $quoted)
     try {
         $script:active = New-Object System.Diagnostics.Process
