@@ -79,7 +79,7 @@ func (s *Store) CatalogCreateFolder(ownerID int64, name string) error {
 
 // CatalogCommitFile publishes a durable immutable blob in one PostgreSQL
 // transaction. expectedVersion=0 means create; a positive value means replace.
-func (s *Store) CatalogCommitFile(ownerID int64, name, checksum string, size, expectedVersion int64) (int64, error) {
+func (s *Store) CatalogCommitFile(ownerID int64, name, checksum string, size, expectedVersion int64, uploadID ...string) (int64, error) {
 	if !drive.ValidCatalogPath(name) || !validCatalogChecksum(checksum) || size < 0 || expectedVersion < 0 {
 		return 0, drive.ErrInvalidPath
 	}
@@ -130,6 +130,24 @@ func (s *Store) CatalogCommitFile(ownerID int64, name, checksum string, size, ex
 	if _, err := tx.Exec(`INSERT INTO change_events(owner_id,path,operation,version,occurred_at)
 		VALUES($1,$2,$3,$4,$5)`, ownerID, name, operation, version, now); err != nil {
 		return 0, err
+	}
+	if len(uploadID) > 1 {
+		return 0, drive.ErrInvalidPath
+	}
+	if len(uploadID) == 1 {
+		result, err := tx.Exec(`UPDATE upload_sessions SET status='complete',received_size=$1,checksum=$2,updated_at=$3
+			WHERE owner_id=$4 AND id=$5 AND path=$6 AND status='pending' AND expected_size=$1
+			AND received_size=$1 AND fingerprint=$2`, size, checksum, now, ownerID, uploadID[0], name)
+		if err != nil {
+			return 0, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if count != 1 {
+			return 0, ErrCatalogRevision
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
