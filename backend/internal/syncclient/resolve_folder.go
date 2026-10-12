@@ -16,7 +16,7 @@ import (
 
 // ResolveFolderConflict applies one explicit choice to a conflicting subtree.
 // Displaced local content is archived; displaced server content goes to Trash.
-func ResolveFolderConflict(ctx context.Context, directory string, state *State, remote *Remote, name, choice string) error {
+func ResolveFolderConflict(ctx context.Context, directory string, state *State, remote *Remote, name, choice string) (resolutionErr error) {
 	if !validPath(name) || (choice != "keep-local" && choice != "keep-remote") {
 		return errors.New("expected a safe folder path and keep-local or keep-remote")
 	}
@@ -34,6 +34,11 @@ func ResolveFolderConflict(ctx context.Context, directory string, state *State, 
 	if !found {
 		return errors.New("no recorded conflict exists for that folder")
 	}
+	defer func() {
+		if resolutionErr != nil {
+			_ = state.MarkConflict(name, "folder resolution was interrupted; review both sides before retrying")
+		}
+	}()
 	server, err := remote.ListAll(ctx)
 	if err != nil {
 		return err
