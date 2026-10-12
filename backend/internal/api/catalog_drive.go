@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
@@ -288,6 +289,170 @@ func registerCatalogDriveRoutes(mux *http.ServeMux, db *store.Store, files *driv
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"restored": true})
+	})
+	mux.HandleFunc("POST /api/v1/drive/move", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}
+		if !jsonBody(w, r, &payload) {
+			return
+		}
+		entry, ok := source(w, r, payload.From)
+		if !ok {
+			return
+		}
+		if err := db.CatalogMoveOrCopy(ownerID, payload.From, payload.To, false, entry.Version); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/v1/drive/copy", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}
+		if !jsonBody(w, r, &payload) {
+			return
+		}
+		entry, ok := source(w, r, payload.From)
+		if !ok {
+			return
+		}
+		if err := db.CatalogMoveOrCopy(ownerID, payload.From, payload.To, true, entry.Version); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux.HandleFunc("POST /api/v1/drive/trash", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			Path string `json:"path"`
+		}
+		if !jsonBody(w, r, &payload) {
+			return
+		}
+		entry, ok := source(w, r, payload.Path)
+		if !ok {
+			return
+		}
+		if err := db.CatalogTrash(ownerID, payload.Path, entry.Version); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/v1/drive/trash", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, false) {
+			return
+		}
+		entries, err := db.TrashEntries(ownerID)
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+	})
+	mux.HandleFunc("POST /api/v1/drive/trash/{id}/restore", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		entries, err := db.CatalogTrashFiles(ownerID, r.PathValue("id"))
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		for _, entry := range entries {
+			if entry.Kind != "file" {
+				continue
+			}
+			file, err := files.OpenBlob(entry.Checksum, entry.Size)
+			if err != nil {
+				driveError(w, err)
+				return
+			}
+			file.Close()
+		}
+		if err := db.CatalogRestoreTrash(ownerID, r.PathValue("id")); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("DELETE /api/v1/drive/trash/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		if err := db.CatalogDeleteForever(ownerID, r.PathValue("id")); err != nil {
+			driveError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/v1/drive/folders/zip", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, false) {
+			return
+		}
+		folder := r.URL.Query().Get("path")
+		entries, err := db.CatalogSubtree(ownerID, folder)
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		if entries[0].Kind != "folder" {
+			driveError(w, drive.ErrInvalidPath)
+			return
+		}
+		for _, entry := range entries {
+			if entry.Kind != "file" {
+				continue
+			}
+			file, err := files.OpenBlob(entry.Checksum, entry.Size)
+			if err != nil {
+				driveError(w, err)
+				return
+			}
+			file.Close()
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(folder) + ".zip"}))
+		archive := zip.NewWriter(w)
+		for _, entry := range entries {
+			name := path.Base(folder) + strings.TrimPrefix(entry.Path, folder)
+			if entry.Kind == "folder" {
+				_, err = archive.Create(name + "/")
+			} else {
+				var writer io.Writer
+				writer, err = archive.Create(name)
+				if err == nil {
+					var file *os.File
+					file, err = files.OpenBlob(entry.Checksum, entry.Size)
+					if err == nil {
+						_, err = io.Copy(writer, file)
+						file.Close()
+					}
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		if closeErr := archive.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			return
+		}
 	})
 }
 
