@@ -111,6 +111,13 @@ func TestPostgresGatewayUsesMetadataRPC(t *testing.T) {
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"path":"grpc-folder"`) {
 		t.Fatalf("list = %d: %s", listed.Code, listed.Body.String())
 	}
+	listed = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/drive?path=grpc-folder", nil)
+	request.AddCookie(cookie)
+	handler.ServeHTTP(listed, request)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"entries":[]`) {
+		t.Fatalf("empty folder list = %d: %s", listed.Code, listed.Body.String())
+	}
 	upload := httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodPut, "/api/v1/drive/files?path=grpc-folder%2Fnote.txt", strings.NewReader("cached listing must refresh"))
 	request.Header.Set("X-CSRF-Token", session.CSRFToken)
