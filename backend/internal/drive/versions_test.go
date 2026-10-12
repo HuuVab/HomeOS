@@ -42,3 +42,36 @@ func TestFileSnapshotAndRestore(t *testing.T) {
 		t.Fatalf("live file changed after corrupt restore: %q, %v", got, err)
 	}
 }
+
+func TestPruneVersionBlobsKeepsReferencedBytes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "files")
+	files, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.Close()
+	if err := files.Upload("one.txt", strings.NewReader("one")); err != nil {
+		t.Fatal(err)
+	}
+	one, err := files.SnapshotFile("one.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Upload("two.txt", strings.NewReader("two")); err != nil {
+		t.Fatal(err)
+	}
+	two, err := files.SnapshotFile("two.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed, err := files.PruneVersionBlobs(map[string]bool{one: true})
+	if err != nil || removed != 1 {
+		t.Fatalf("removed = %d, %v", removed, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, versionsDir, one)); err != nil {
+		t.Fatalf("referenced blob disappeared: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, versionsDir, two)); !os.IsNotExist(err) {
+		t.Fatalf("unreferenced blob remains: %v", err)
+	}
+}
