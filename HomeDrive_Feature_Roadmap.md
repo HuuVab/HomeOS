@@ -34,7 +34,7 @@
 - [ ] **P1** File type filters
 - [ ] **P1** Keyboard shortcuts
 - [x] **P1** Breadcrumb navigation
-- [ ] **P1** File version history and restore
+- [x] **P1** File version history and restore (PostgreSQL-backed snapshots, API, and Drive details panel)
 - [x] **P1** Recycle bin, restore, and permanent deletion
 - [x] **P1** Automatically delete Trash items after a configurable retention period (default 30 days)
 - [ ] **P1** Duplicate file handling
@@ -57,7 +57,7 @@
 - [ ] **P1** Upload speed indicator
 - [ ] **P1** Duplicate upload detection
 - [x] **P1** Streaming large-file downloads
-- [ ] **P1** Integrity checks and checksums
+- [ ] **P1** Integrity checks and checksums (full-file SHA-256 snapshots and upload-chunk checks are implemented; download verification and scheduled scrubbing remain)
 - [ ] **P2** Transfer bandwidth throttling
 - [ ] **P2** Content-addressable deduplication
 - [ ] **P2** Background transfer processing
