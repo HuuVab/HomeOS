@@ -75,6 +75,17 @@ cd ..\frontend
 npm run build
 ```
 
+GitHub Actions runs these checks on pull requests, pushes to `main`, and
+version tags. Its Linux job uses a disposable PostgreSQL 17 service so the
+PostgreSQL integration tests do not silently skip; a Windows job tests the Go
+client and smoke-tests an extracted sync package. Successful runs retain the
+Windows server executable, portable sync ZIP, and built frontend as workflow
+artifacts. Pushing an existing `v*` tag (for example `v0.2.0`) after the tests
+pass also creates a GitHub Release with those three assets. The workflow does
+not deploy to or restart a personal computer, and it uses no production
+database credentials. Only the tagged-release job receives repository write
+permission.
+
 To exercise the PostgreSQL metadata path, set `HOMEOS_TEST_POSTGRES_URL` to a disposable PostgreSQL database URL and run `go test ./internal/store -run TestPostgresMetadataIntegration -v` from `backend`. The test creates and drops an isolated random schema; it skips when the variable is unset. It passed against a local PostgreSQL 17 instance on 2026-10-11. PostgreSQL-backed HomeDrive serves metadata reads from the database, while standalone SQLite keeps filesystem-backed reads.
 
 Do not point a fresh PostgreSQL database at an existing SQLite-mode HomeDrive file directory expecting automatic import. PostgreSQL mode treats its catalog as authoritative for listings and rejects filesystem/catalog drift on writes. To import one existing owner's files into an **empty** PostgreSQL catalog, stop the HomeOS server, back up the old database and file directory, set `HOMEOS_DATABASE_URL` and the same `HOMEOS_DATA_DIR` used by the files, then run `go run ./cmd/homeos drive-import <owner-id>` to inspect the dry-run counts. Re-run with `--apply` only after checking them. The command refuses owners that already have file, Trash, upload, or pending reconciliation records; it does not repair or overwrite a populated catalog. Start the server after import. PostgreSQL itself can run locally or remotely; Docker is optional.

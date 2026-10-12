@@ -1,0 +1,128 @@
+name: HomeOS CI and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Go and PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: homeos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d homeos_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      HOMEOS_TEST_POSTGRES_URL: postgres://postgres:ci_password@127.0.0.1:5432/homeos_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Test backend and PostgreSQL integration
+        working-directory: backend
+        run: go test ./... -count=1
+      - name: Vet backend
+        working-directory: backend
+        run: go vet ./...
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Type-check and build
+        working-directory: frontend
+        run: npm run build
+      - name: Pack release frontend
+        run: |
+          mkdir -p release-assets
+          tar -czf release-assets/frontend-dist.tar.gz -C frontend/dist .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-frontend
+          path: release-assets/frontend-dist.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Windows build and sync package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Test Windows backend
+        working-directory: backend
+        run: go test ./... -count=1
+      - name: Build Windows server
+        working-directory: backend
+        run: go build -o bin/homeos.exe ./cmd/homeos
+      - name: Build portable sync package
+        shell: pwsh
+        run: ./scripts/package-homeos-sync.ps1
+      - name: Smoke-test extracted sync package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path smoke/root -Force | Out-Null
+          Expand-Archive -LiteralPath backend/bin/HomeDrive-Sync-Windows.zip -DestinationPath smoke
+          $client = 'smoke/HomeDrive-Sync-Windows/homeos-sync.exe'
+          & $client init smoke/root
+          if ($LASTEXITCODE -ne 0) { throw 'Sync initialization failed' }
+          $status = & $client status smoke/root --json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $null -ne $status.pending -or $null -ne $status.conflicts) { throw 'Sync status smoke test failed' }
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          Copy-Item -LiteralPath backend/bin/homeos.exe -Destination release-assets/homeos.exe
+          Copy-Item -LiteralPath backend/bin/HomeDrive-Sync-Windows.zip -Destination release-assets/HomeDrive-Sync-Windows.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: release-assets/*
+          if-no-files-found: error
+
+  release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, frontend, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes
