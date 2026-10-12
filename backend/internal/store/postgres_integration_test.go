@@ -95,7 +95,12 @@ func TestPostgresMetadataIntegration(t *testing.T) {
 	drifted := append([]drive.Entry(nil), withChecksum...)
 	drifted[1].Size++
 	report, err = db.RepairDriveCatalog(1, drifted, true)
-	if err == nil || report.Mismatched != 1 {
+	if err != nil || report.Mismatched != 1 || report.Unverified != 0 {
+		t.Fatalf("verified metadata repair = %+v, %v", report, err)
+	}
+	drifted[1].Checksum = strings.Repeat("b", 64)
+	report, err = db.RepairDriveCatalog(1, drifted, true)
+	if err == nil || report.Mismatched != 1 || report.Unverified != 1 {
 		t.Fatalf("drift repair = %+v, %v", report, err)
 	}
 	trash := drive.TrashEntry{ID: "00000000000000000000000000000001", Path: "old.txt", DeletedAt: stamp}

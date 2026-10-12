@@ -12,11 +12,13 @@ type RepairReport struct {
 	MissingOnDisk    int `json:"missingOnDisk"`
 	MissingInCatalog int `json:"missingInCatalog"`
 	Mismatched       int `json:"mismatched"`
+	Unverified       int `json:"unverified"`
 	MissingChecksums int `json:"missingChecksums"`
 }
 
-// RepairDriveCatalog backfills only checksums and snapshots for unchanged files.
-// It refuses any drift, so it never deletes or rewrites an existing catalog entry.
+// RepairDriveCatalog can add missing catalog rows and correct metadata only when
+// existing file bytes match their committed checksum. It never deletes rows or
+// accepts an unverifiable replacement of committed bytes.
 func (s *Store) RepairDriveCatalog(ownerID int64, entries []drive.Entry, apply bool) (RepairReport, error) {
 	var report RepairReport
 	if !s.AuthoritativeMetadata() || ownerID < 1 {
@@ -65,6 +67,9 @@ func (s *Store) RepairDriveCatalog(ownerID int64, entries []drive.Entry, apply b
 		if old.kind != entry.Kind || old.size != entry.Size || old.modified != entry.ModifiedAt.Unix() ||
 			(old.checksum != "" && old.checksum != entry.Checksum) {
 			report.Mismatched++
+			if old.kind != entry.Kind || (entry.Kind == "file" && (old.checksum == "" || old.checksum != entry.Checksum)) {
+				report.Unverified++
+			}
 			continue
 		}
 		if entry.Kind == "file" && old.checksum == "" {
@@ -75,8 +80,8 @@ func (s *Store) RepairDriveCatalog(ownerID int64, entries []drive.Entry, apply b
 	if !apply {
 		return report, nil
 	}
-	if report.MissingOnDisk != 0 || report.MissingInCatalog != 0 || report.Mismatched != 0 {
-		return report, errors.New("catalog drift detected; refusing automatic repair")
+	if report.MissingOnDisk != 0 || report.Unverified != 0 {
+		return report, errors.New("missing file bytes or unverified content drift; refusing automatic repair")
 	}
 	if err := s.reconcileEntriesTx(tx, ownerID, entries, false); err != nil {
 		return report, err
