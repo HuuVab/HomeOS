@@ -323,6 +323,15 @@ func main() {
 		log.Fatal("load HomeDrive recovery markers: ", err)
 	}
 	for _, ownerID := range pendingOwners {
+		if db.AuthoritativeMetadata() {
+			format, formatErr := db.StorageFormat(ownerID)
+			if formatErr != nil {
+				log.Fatalf("read storage format for user %d: %v", ownerID, formatErr)
+			}
+			if format == "blobs" {
+				log.Fatalf("unexpected legacy mutation marker for blob owner %d; refusing filesystem reconciliation", ownerID)
+			}
+		}
 		userFiles, err := files.ForUser(ownerID)
 		if err != nil {
 			log.Fatalf("open HomeDrive for recovery of user %d: %v", ownerID, err)
@@ -350,6 +359,13 @@ func main() {
 			log.Fatal("list HomeDrive owners: ", err)
 		}
 		for _, ownerID := range ownerIDs {
+			format, formatErr := db.StorageFormat(ownerID)
+			if formatErr != nil {
+				log.Fatalf("read storage format for user %d: %v", ownerID, formatErr)
+			}
+			if format == "blobs" {
+				continue
+			}
 			userFiles, err := files.ForUser(ownerID)
 			if err == nil {
 				err = db.RecoverUploadSessions(ownerID, userFiles.PendingUploads())
@@ -403,6 +419,17 @@ func main() {
 			return
 		}
 		for _, ownerID := range owners {
+			format, formatErr := db.StorageFormat(ownerID)
+			if formatErr != nil {
+				log.Printf("HomeDrive storage format for user %d: %v", ownerID, formatErr)
+				continue
+			}
+			if format == "blobs" {
+				if _, err := db.CatalogPurgeExpiredTrash(ownerID, time.Now().Add(-retention).Unix()); err != nil {
+					log.Printf("HomeDrive catalog Trash cleanup for user %d: %v", ownerID, err)
+				}
+				continue
+			}
 			userFiles, err := files.ForUser(ownerID)
 			if err == nil {
 				err = db.BeginFileMutation(ownerID)
