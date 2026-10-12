@@ -211,6 +211,25 @@ func (s *State) RemoveBaseline(path string) error {
 	return tx.Commit()
 }
 
+// RemoveTree clears sync bookkeeping for one path and its descendants. The
+// caller must finish the chosen remote/local conflict operation first.
+func (s *State) RemoveTree(name string) error {
+	if !validPath(name) {
+		return errors.New("invalid sync path")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"files", "pending", "conflicts", "local_scan"} {
+		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE path=? OR substr(path,1,?)=?`, name, len(name)+1, name+"/"); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *State) Queue(item Pending) error {
 	if item.Path == "" || (item.Operation != "create" && item.Operation != "update" && item.Operation != "delete") {
 		return errors.New("invalid pending operation")
