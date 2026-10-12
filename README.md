@@ -26,7 +26,7 @@ The [deployment and backup guide](docs/deployment.md) describes Docker packaging
 
 The [HomeDrive v0.2 guide](docs/v0.2-homedrive.md) documents its storage boundaries, API, large-file behavior, and separate file-backup requirement. The web app has a service sidebar; unfinished modules are explicitly marked as planned.
 
-The [HomeDrive architecture addendum](HomeDrive_Architecture_Addendum.md) records the additive PostgreSQL, SQLite sync-client, Redis, and gRPC decisions. PostgreSQL support and the expanded metadata schema are the first implemented increment; gRPC, Redis, desktop sync, messaging, and observability remain staged work.
+The [HomeDrive architecture addendum](HomeDrive_Architecture_Addendum.md) records the additive PostgreSQL, SQLite sync-client, Redis, and gRPC decisions. PostgreSQL support, the expanded metadata schema, and an in-process metadata gRPC increment are implemented; Redis, desktop sync, messaging, and observability remain staged work.
 
 ## Planned repository layout
 
