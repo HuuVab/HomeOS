@@ -67,6 +67,9 @@ func newHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 				if r.Method != http.MethodGet && r.Method != http.MethodHead {
 					db.LockDriveMutations()
 					defer db.UnlockDriveMutations()
+				} else {
+					db.LockDriveReads()
+					defer db.UnlockDriveReads()
 				}
 				catalogMux.ServeHTTP(w, r)
 				return
