@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -130,5 +131,34 @@ func TestCatalogHTTPRoundTripPostgres(t *testing.T) {
 	}
 	if result := call("GET", "/api/v1/drive/files?path=docs%2Fnote.txt", "", "", cookie, ""); result.Code != 200 || result.Body.String() != "updated" {
 		t.Fatalf("restored download %d: %q", result.Code, result.Body.String())
+	}
+	chunk := []byte("resumable")
+	digest := sha256.Sum256(chunk)
+	fingerprint := hex.EncodeToString(digest[:])
+	started := call("POST", "/api/v1/drive/uploads", `{"path":"docs/chunk.txt","size":9,"fingerprint":"`+fingerprint+`"}`, session.CSRF, cookie, "")
+	if started.Code != 200 {
+		t.Fatalf("start upload %d: %s", started.Code, started.Body.String())
+	}
+	var upload struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(started.Body.Bytes(), &upload); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/drive/uploads/"+upload.ID, strings.NewReader(string(chunk)))
+	request.Header.Set("X-CSRF-Token", session.CSRF)
+	request.Header.Set("X-Upload-Offset", "0")
+	request.Header.Set("X-Chunk-SHA256", fingerprint)
+	request.AddCookie(cookie)
+	patched := httptest.NewRecorder()
+	handler.ServeHTTP(patched, request)
+	if patched.Code != 200 {
+		t.Fatalf("append upload %d: %s", patched.Code, patched.Body.String())
+	}
+	if completed := call("POST", "/api/v1/drive/uploads/"+upload.ID+"/complete", "", session.CSRF, cookie, ""); completed.Code != 204 {
+		t.Fatalf("complete upload %d: %s", completed.Code, completed.Body.String())
+	}
+	if result := call("GET", "/api/v1/drive/files?path=docs%2Fchunk.txt", "", "", cookie, ""); result.Code != 200 || result.Body.String() != string(chunk) {
+		t.Fatalf("resumable download %d: %q", result.Code, result.Body.String())
 	}
 }
