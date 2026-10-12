@@ -79,6 +79,25 @@ func TestPostgresMetadataIntegration(t *testing.T) {
 	if err != nil || len(events) != 2 {
 		t.Fatalf("events = %+v, %v", events, err)
 	}
+	withChecksum := append([]drive.Entry(nil), entries...)
+	withChecksum[1].Checksum = strings.Repeat("a", 64)
+	report, err := db.RepairDriveCatalog(1, withChecksum, false)
+	if err != nil || report.MissingChecksums != 1 || report.Mismatched != 0 {
+		t.Fatalf("repair dry run = %+v, %v", report, err)
+	}
+	if _, err := db.RepairDriveCatalog(1, withChecksum, true); err != nil {
+		t.Fatal(err)
+	}
+	versions, err := db.FileVersions(1, "docs/note.txt")
+	if err != nil || len(versions) != 1 || versions[0].Version != 1 || versions[0].Checksum != withChecksum[1].Checksum {
+		t.Fatalf("backfilled versions = %+v, %v", versions, err)
+	}
+	drifted := append([]drive.Entry(nil), withChecksum...)
+	drifted[1].Size++
+	report, err = db.RepairDriveCatalog(1, drifted, true)
+	if err == nil || report.Mismatched != 1 {
+		t.Fatalf("drift repair = %+v, %v", report, err)
+	}
 	trash := drive.TrashEntry{ID: "00000000000000000000000000000001", Path: "old.txt", DeletedAt: stamp}
 	upload := drive.UploadSession{ID: "00000000000000000000000000000002", Path: "later.txt", Size: 4, Fingerprint: strings.Repeat("a", 64), Offset: 2, Staged: true}
 	if err := db.BeginFileMutation(1); err != nil {
