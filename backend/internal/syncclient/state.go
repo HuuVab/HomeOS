@@ -165,6 +165,11 @@ func (s *State) MarkConflict(path, reason string) error {
 	return err
 }
 
+func (s *State) ClearConflict(path string) error {
+	_, err := s.db.Exec(`DELETE FROM conflicts WHERE path=?`, path)
+	return err
+}
+
 func (s *State) Conflicts() ([]Conflict, error) {
 	rows, err := s.db.Query(`SELECT path,reason FROM conflicts ORDER BY path`)
 	if err != nil {

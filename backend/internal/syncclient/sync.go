@@ -138,6 +138,9 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 			continue
 		}
 		if known && baseline.RemoteVersion == entry.Version && exists {
+			if err := state.ClearConflict(name); err != nil {
+				return report, err
+			}
 			continue
 		}
 		if known && exists && entry.Kind == "file" {
