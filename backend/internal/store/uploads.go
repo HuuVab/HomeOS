@@ -120,12 +120,31 @@ func (s *Store) reconcileUploadSessionsTx(tx *sql.Tx, ownerID int64, active []dr
 	return nil
 }
 
-func (s *Store) RecoverUploadSessions(ownerID int64, active []drive.UploadSession, entries []drive.Entry) error {
+func (s *Store) RecoverUploadSessions(ownerID int64, active []drive.UploadSession) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	rows, err := tx.Query(s.query(`SELECT path, size FROM file_entries WHERE owner_id = ? AND kind = 'file'`), ownerID)
+	if err != nil {
+		return err
+	}
+	entries := make([]drive.Entry, 0)
+	for rows.Next() {
+		var entry drive.Entry
+		entry.Kind = "file"
+		if err := rows.Scan(&entry.Path, &entry.Size); err != nil {
+			rows.Close()
+			return err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
 	if err := s.reconcileUploadSessionsTx(tx, ownerID, active, entries); err != nil {
 		return err
 	}
