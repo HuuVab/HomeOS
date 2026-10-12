@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,29 @@ func TestRemoteRejectsUnsafeLocationsAndPaths(t *testing.T) {
 	}
 	if !validPath("docs/note.txt") || !strings.HasPrefix("docs/note.txt", "docs/") {
 		t.Fatal("rejected normal path")
+	}
+}
+
+func TestRemoteRejectsCaseCollidingFilesOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows case-insensitive filesystem safeguard")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/login" {
+			_, _ = w.Write([]byte(`{"user":{"id":1},"csrfToken":"token"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"entries":[{"path":"Readme.txt","kind":"file","version":1},{"path":"README.txt","kind":"file","version":1}]}`))
+	}))
+	defer server.Close()
+	remote, err := NewRemote(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Login(context.Background(), "test", "password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.ListAll(context.Background()); err == nil {
+		t.Fatal("expected server case collision to be rejected")
 	}
 }
