@@ -69,7 +69,7 @@ func (s *Store) Search(query string) ([]Entry, error) {
 			return err
 		}
 		for _, item := range items {
-			if item.Type()&os.ModeSymlink != 0 || item.Name() == trashDir || item.Name() == ".homeos-users" || item.Name() == ".homeos-staging" || strings.HasPrefix(item.Name(), ".homeos-upload-") {
+			if item.Type()&os.ModeSymlink != 0 || item.Name() == trashDir || item.Name() == ".homeos-users" || item.Name() == ".homeos-staging" || item.Name() == ".homeos-versions" || strings.HasPrefix(item.Name(), ".homeos-upload-") {
 				continue
 			}
 			entryPath := item.Name()
