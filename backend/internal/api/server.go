@@ -15,6 +15,7 @@ import (
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
 	"github.com/HuuVab/HomeOS/backend/internal/metadatapb"
 	"github.com/HuuVab/HomeOS/backend/internal/monitor"
+	"github.com/HuuVab/HomeOS/backend/internal/redisaccel"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
 
@@ -30,12 +31,20 @@ type statusResponse struct {
 }
 
 func NewHandler(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store, metadataClients ...metadatapb.MetadataServiceClient) http.Handler {
+	return newHandler(webDir, db, collector, files, nil, metadataClients...)
+}
+
+func NewHandlerWithRedis(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store, accelerator *redisaccel.Layer, metadataClient metadatapb.MetadataServiceClient) http.Handler {
+	return newHandler(webDir, db, collector, files, accelerator, metadataClient)
+}
+
+func newHandler(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store, accelerator *redisaccel.Layer, metadataClients ...metadatapb.MetadataServiceClient) http.Handler {
 	var metadataClient metadatapb.MetadataServiceClient
 	if len(metadataClients) > 0 {
 		metadataClient = metadataClients[0]
 	}
 	mux := http.NewServeMux()
-	registerAuthRoutes(mux, db)
+	registerAuthRoutes(mux, db, accelerator)
 	driveHandler := func(w http.ResponseWriter, r *http.Request) {
 		user, _, _, ok := authenticate(w, r, db)
 		if !ok {

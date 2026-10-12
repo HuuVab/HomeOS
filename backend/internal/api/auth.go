@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/auth"
+	"github.com/HuuVab/HomeOS/backend/internal/redisaccel"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
 
@@ -56,10 +58,21 @@ func (l *loginLimiter) allow(remote string) bool {
 	return true
 }
 
-func registerAuthRoutes(mux *http.ServeMux, db *store.Store) {
+func registerAuthRoutes(mux *http.ServeMux, db *store.Store, accelerator *redisaccel.Layer) {
 	limiter := &loginLimiter{attempts: make(map[string]loginAttempt)}
 	mux.HandleFunc("POST /api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
-		if !limiter.allow(r.RemoteAddr) {
+		allowed := false
+		if accelerator != nil {
+			var err error
+			allowed, err = accelerator.AllowLogin(r.Context(), r.RemoteAddr)
+			if err != nil {
+				log.Printf("Redis login limiter unavailable: %v", err)
+				allowed = limiter.allow(r.RemoteAddr)
+			}
+		} else {
+			allowed = limiter.allow(r.RemoteAddr)
+		}
+		if !allowed {
 			writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many login attempts")
 			return
 		}
