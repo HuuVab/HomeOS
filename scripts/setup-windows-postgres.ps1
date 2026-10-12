@@ -138,8 +138,10 @@ if (-not $userTable) {
 }
 
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$restartTask = $existing -and $existing.State -eq 'Running'
 if ($existing) {
-    if ($existing.Actions.Count -ne 1 -or $existing.Actions[0].Arguments -notlike "*$launcher*") {
+    if ($existing.Actions.Count -ne 1 -or $existing.Actions[0].Arguments -notlike "*$launcher*" -or
+        ($existing.Principal.UserId -ne $identity -and $existing.Principal.UserId -ne $env:USERNAME)) {
         throw "A different scheduled task named '$taskName' already exists; it was not changed."
     }
 } else {
@@ -150,7 +152,26 @@ if ($existing) {
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Start HomeOS with PostgreSQL 17 when this user signs in' | Out-Null
 }
-if (-not (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue)) {
+if ($restartTask) {
+    Stop-ScheduledTask -TaskName $taskName
+    $listener = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($listener) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)"
+        $expectedBinary = Join-Path $backend 'bin\homeos.exe'
+        if (-not $process -or -not [string]::Equals($process.ExecutablePath, $expectedBinary, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Port 8080 belongs to an unexpected process; refusing to stop it.'
+        }
+        Stop-Process -Id $listener.OwningProcess -Force
+    }
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        if (-not (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    if (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue) {
+        throw 'The previous HomeOS instance did not release port 8080; refusing to launch a duplicate.'
+    }
+    Start-ScheduledTask -TaskName $taskName
+} elseif (-not (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue)) {
     Start-ScheduledTask -TaskName $taskName
 }
 Write-Host 'HomeOS PostgreSQL setup is ready. PostgreSQL starts with Windows; HomeOS starts when this user signs in.'
