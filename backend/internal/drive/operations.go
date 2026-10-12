@@ -133,6 +133,16 @@ func (s *Store) AllEntries() ([]Entry, error) {
 	if err := visit(""); err != nil {
 		return nil, err
 	}
+	for i := range result {
+		if result[i].Kind != "file" {
+			continue
+		}
+		checksum, err := s.SnapshotFile(result[i].Path)
+		if err != nil {
+			return nil, err
+		}
+		result[i].Checksum = checksum
+	}
 	return result, nil
 }
 
