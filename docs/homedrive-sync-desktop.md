@@ -20,9 +20,8 @@ polling. Sync state is stored inside the selected local folder in
 `.homeos-sync/state.sqlite`; protect that folder and keep backups. The first
 scan reads all local files. Later scans traverse directory metadata but reuse
 saved SHA-256 values for files whose size and modification timestamp have not
-changed. If another program changes bytes while preserving both fields, run a
-fresh scan after changing the timestamp; this metadata-based cache cannot
-detect such a change on its own.
+changed. A full SHA-256 audit runs at least once every 24 hours to catch
+same-size, same-timestamp edits; until that audit, such edits may go unnoticed.
 
 For developers, run `scripts/package-homeos-sync.ps1` to build
 `backend/bin/HomeDrive-Sync-Windows.zip`. The package does not install HomeOS
