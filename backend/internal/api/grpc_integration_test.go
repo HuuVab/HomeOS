@@ -133,4 +133,29 @@ func TestPostgresGatewayUsesMetadataRPC(t *testing.T) {
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"path":"grpc-folder/note.txt"`) {
 		t.Fatalf("list after upload = %d: %s", listed.Code, listed.Body.String())
 	}
+	stale := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/drive/files?path=grpc-folder%2Fnote.txt", strings.NewReader("stale edit"))
+	request.Header.Set("X-CSRF-Token", session.CSRFToken)
+	request.Header.Set("X-Source-Version", "99")
+	request.AddCookie(cookie)
+	handler.ServeHTTP(stale, request)
+	if stale.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale replacement = %d: %s", stale.Code, stale.Body.String())
+	}
+	replace := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/drive/files?path=grpc-folder%2Fnote.txt", strings.NewReader("new contents"))
+	request.Header.Set("X-CSRF-Token", session.CSRFToken)
+	request.Header.Set("X-Source-Version", "1")
+	request.AddCookie(cookie)
+	handler.ServeHTTP(replace, request)
+	if replace.Code != http.StatusNoContent {
+		t.Fatalf("replacement = %d: %s", replace.Code, replace.Body.String())
+	}
+	versions := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/drive/versions?path=grpc-folder%2Fnote.txt", nil)
+	request.AddCookie(cookie)
+	handler.ServeHTTP(versions, request)
+	if versions.Code != http.StatusOK || !strings.Contains(versions.Body.String(), `"version":2`) {
+		t.Fatalf("versions after replacement = %d: %s", versions.Code, versions.Body.String())
+	}
 }
