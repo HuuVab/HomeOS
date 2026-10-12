@@ -3,11 +3,13 @@ package metadata
 import (
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path"
 
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
 	"github.com/HuuVab/HomeOS/backend/internal/metadatapb"
+	"github.com/HuuVab/HomeOS/backend/internal/redisaccel"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -19,6 +21,7 @@ type Service struct {
 	metadatapb.UnimplementedMetadataServiceServer
 	DB    *store.Store
 	Files *drive.Store
+	Cache *redisaccel.Layer
 }
 
 func (s *Service) ready(ownerID int64) error {
@@ -62,13 +65,31 @@ func (s *Service) GetFile(_ context.Context, request *metadatapb.GetFileRequest)
 	return fileEntry(entry), nil
 }
 
-func (s *Service) ListFiles(_ context.Context, request *metadatapb.ListFilesRequest) (*metadatapb.ListFilesResponse, error) {
+func (s *Service) ListFiles(ctx context.Context, request *metadatapb.ListFilesRequest) (*metadatapb.ListFilesResponse, error) {
 	if err := s.ready(request.GetOwnerId()); err != nil {
 		return nil, err
 	}
-	entries, err := s.DB.FileEntries(request.GetOwnerId(), request.GetFolder())
+	var entries []drive.Entry
+	var generation string
+	var hit bool
+	if s.Cache != nil {
+		var cacheErr error
+		entries, hit, generation, cacheErr = s.Cache.ListFiles(ctx, request.GetOwnerId(), request.GetFolder())
+		if cacheErr != nil {
+			log.Printf("HomeDrive Redis listing cache unavailable: %v", cacheErr)
+		}
+	}
+	var err error
+	if !hit {
+		entries, err = s.DB.FileEntries(request.GetOwnerId(), request.GetFolder())
+	}
 	if err != nil {
 		return nil, metadataError(err)
+	}
+	if !hit && s.Cache != nil && generation != "" {
+		if cacheErr := s.Cache.StoreFiles(ctx, request.GetOwnerId(), request.GetFolder(), generation, entries); cacheErr != nil {
+			log.Printf("HomeDrive Redis listing cache write failed: %v", cacheErr)
+		}
 	}
 	result := &metadatapb.ListFilesResponse{Entries: make([]*metadatapb.FileEntry, 0, len(entries))}
 	for _, entry := range entries {
@@ -77,7 +98,7 @@ func (s *Service) ListFiles(_ context.Context, request *metadatapb.ListFilesRequ
 	return result, nil
 }
 
-func (s *Service) CreateFolder(_ context.Context, request *metadatapb.CreateFolderRequest) (*metadatapb.FileEntry, error) {
+func (s *Service) CreateFolder(ctx context.Context, request *metadatapb.CreateFolderRequest) (*metadatapb.FileEntry, error) {
 	ownerID := request.GetOwnerId()
 	if err := s.ready(ownerID); err != nil {
 		return nil, err
@@ -140,6 +161,11 @@ func (s *Service) CreateFolder(_ context.Context, request *metadatapb.CreateFold
 	}
 	if err != nil {
 		return nil, metadataError(err) // Recovery marker remains durable.
+	}
+	if s.Cache != nil {
+		if cacheErr := s.Cache.InvalidateOwner(ctx, ownerID); cacheErr != nil {
+			log.Printf("HomeDrive Redis listing invalidation failed: %v", cacheErr)
+		}
 	}
 	entry, err := s.DB.FileEntry(ownerID, name)
 	if err != nil {
