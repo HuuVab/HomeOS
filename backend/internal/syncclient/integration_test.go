@@ -150,4 +150,20 @@ func TestPostgresDesktopSyncThroughHomeOSAPI(t *testing.T) {
 	if err != nil || entries["shared/local.txt"].Kind != "file" {
 		t.Fatalf("local folder choice %+v: %v", entries, err)
 	}
+	if err := remote.CreateFolder(context.Background(), "type-clash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localRoot, "type-clash"), []byte("local file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.MarkConflict("type-clash", "file and folder collide"); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncclient.ResolveFolderConflict(context.Background(), localRoot, state, remote, "type-clash", "keep-local"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = remote.ListAll(context.Background())
+	if err != nil || entries["type-clash"].Kind != "file" {
+		t.Fatalf("type conflict choice %+v: %v", entries, err)
+	}
 }

@@ -100,10 +100,10 @@ func ResolveFolderConflict(ctx context.Context, directory string, state *State, 
 		}
 		return nil
 	}
-	if !localExists || !localInfo.IsDir() {
-		return errors.New("keep-local requires a local folder")
+	if !localExists || (!localInfo.IsDir() && !localInfo.Mode().IsRegular()) {
+		return errors.New("keep-local requires a local file or folder")
 	}
-	local, err := collectLocalFolder(directory, name)
+	local, err := collectLocalTree(directory, name)
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func subtreeNames(entries map[string]RemoteEntry, name string) []string {
 	return names
 }
 
-func collectLocalFolder(directory, name string) ([]LocalEntry, error) {
+func collectLocalTree(directory, name string) ([]LocalEntry, error) {
 	base := filepath.Join(directory, filepath.FromSlash(name))
 	var result []LocalEntry
 	err := filepath.WalkDir(base, func(filename string, entry fs.DirEntry, walkErr error) error {
