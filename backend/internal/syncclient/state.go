@@ -69,6 +69,7 @@ func OpenState(root string) (*State, error) {
 		`CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, kind TEXT NOT NULL, remote_version INTEGER NOT NULL, local_hash TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, operation TEXT NOT NULL, base_version INTEGER NOT NULL, local_hash TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE IF NOT EXISTS conflicts (path TEXT PRIMARY KEY, reason TEXT NOT NULL, detected_at INTEGER NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS remote_entries (path TEXT PRIMARY KEY, kind TEXT NOT NULL, size INTEGER NOT NULL, version INTEGER NOT NULL)`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()
@@ -76,6 +77,31 @@ func OpenState(root string) (*State, error) {
 		}
 	}
 	return &State{db: db}, nil
+}
+
+func (s *State) RemoteEntries() (map[string]RemoteEntry, error) {
+	rows, err := s.db.Query(`SELECT path,kind,size,version FROM remote_entries`)
+	if err != nil { return nil, err }
+	defer rows.Close()
+	entries := make(map[string]RemoteEntry)
+	for rows.Next() {
+		var entry RemoteEntry
+		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &entry.Version); err != nil { return nil, err }
+		entries[entry.Path] = entry
+	}
+	return entries, rows.Err()
+}
+
+func (s *State) SaveRemoteEntries(entries map[string]RemoteEntry, cursor int64) error {
+	tx, err := s.db.Begin()
+	if err != nil { return err }
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM remote_entries`); err != nil { return err }
+	for _, entry := range entries {
+		if _, err := tx.Exec(`INSERT INTO remote_entries(path,kind,size,version) VALUES(?,?,?,?)`, entry.Path, entry.Kind, entry.Size, entry.Version); err != nil { return err }
+	}
+	if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('cursor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fmt.Sprint(cursor)); err != nil { return err }
+	return tx.Commit()
 }
 
 func (s *State) Close() error { return s.db.Close() }
