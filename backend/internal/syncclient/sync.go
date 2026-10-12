@@ -120,12 +120,55 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 				}
 				continue
 			}
-			reason := "local and remote changes need manual resolution"
-			if queued.Operation == "update" && entry.Version == queued.BaseVersion {
-				reason = "remote overwrite is not supported by this prototype"
-			} else if queued.Operation == "delete" {
-				reason = "local deletion is not automatically propagated"
+			if queued.Operation == "delete" {
+				continue // Apply deletes after children, in the pending-operation pass.
 			}
+			if queued.Operation == "update" && exists && known && current.Kind == "file" && entry.Kind == "file" && current.Hash == queued.LocalHash && entry.Version == queued.BaseVersion {
+				if current.Size > maxPrototypeFileBytes {
+					if err := state.MarkConflict(name, "file exceeds the 32 MiB prototype limit"); err != nil {
+						return report, err
+					}
+					report.Conflicts++
+					continue
+				}
+				file, err := root.Open(filepath.FromSlash(name))
+				if err != nil {
+					return report, err
+				}
+				hash := sha256.New()
+				updateErr := remote.UploadUpdated(ctx, name, queued.BaseVersion, io.TeeReader(file, hash))
+				closeErr := file.Close()
+				if updateErr == nil {
+					updateErr = closeErr
+				}
+				if updateErr != nil {
+					if strings.Contains(updateErr.Error(), "HTTP 412") {
+						if err := state.MarkConflict(name, "remote version changed during upload"); err != nil {
+							return report, err
+						}
+						report.Conflicts++
+					} else if err := state.Retry(name, updateErr); err != nil {
+						return report, err
+					} else {
+						report.Retried++
+					}
+					continue
+				}
+				if hex.EncodeToString(hash.Sum(nil)) != current.Hash {
+					if err := state.MarkConflict(name, "local file changed during upload"); err != nil {
+						return report, err
+					}
+					report.Conflicts++
+					continue
+				}
+				if err := state.SaveBaseline(Baseline{Path: name, Kind: "file", RemoteVersion: entry.Version + 1, LocalHash: current.Hash}); err != nil {
+					return report, err
+				}
+				server[name] = RemoteEntry{Path: name, Kind: "file", Size: current.Size, Version: entry.Version + 1}
+				report.Updated++
+				continue
+			}
+			reason := "local and remote changes need manual resolution"
 			if err := state.MarkConflict(name, reason); err != nil {
 				return report, err
 			}

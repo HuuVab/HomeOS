@@ -51,8 +51,15 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
-			if _, exists := entries[name]; exists {
-				w.WriteHeader(http.StatusConflict)
+			if old, exists := entries[name]; exists {
+				if r.Header.Get("X-Source-Version") != "1" && r.Header.Get("X-Source-Version") != "2" {
+					w.WriteHeader(http.StatusPreconditionFailed)
+					return
+				}
+				body, _ := io.ReadAll(r.Body)
+				contents[name] = string(body)
+				entries[name] = RemoteEntry{Path: name, Kind: "file", Version: old.Version + 1, Size: int64(len(body))}
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 			body, _ := io.ReadAll(r.Body)
@@ -106,34 +113,36 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	report, err = Sync(context.Background(), root, state, remote)
-	if err != nil || report.Conflicts != 1 {
-		t.Fatalf("edit conflict sync=%+v err=%v", report, err)
+	if err != nil || report.Updated != 1 || report.Conflicts != 0 {
+		t.Fatalf("local edit sync=%+v err=%v", report, err)
 	}
 	conflicts, err := state.Conflicts()
-	if err != nil || len(conflicts) != 1 || conflicts[0].Path != "docs/remote.txt" {
+	if err != nil || len(conflicts) != 0 {
 		t.Fatalf("conflicts=%+v err=%v", conflicts, err)
 	}
 	mu.Lock()
-	unchanged := contents["docs/remote.txt"]
+	updated := contents["docs/remote.txt"]
 	mu.Unlock()
-	if unchanged != "remote" {
-		t.Fatalf("remote file was overwritten: %q", unchanged)
-	}
-	if err := os.WriteFile(remoteFile, []byte("remote"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	report, err = Sync(context.Background(), root, state, remote)
-	if err != nil || report.Conflicts != 0 {
-		t.Fatalf("resolved local edit sync=%+v err=%v", report, err)
-	}
-	conflicts, err = state.Conflicts()
-	if err != nil || len(conflicts) != 0 {
-		t.Fatalf("resolved conflicts=%+v err=%v", conflicts, err)
+	if updated != "local edit" {
+		t.Fatalf("remote file was not updated: %q", updated)
 	}
 	mu.Lock()
 	contents["docs/remote.txt"] = "changed on server"
-	entries["docs/remote.txt"] = RemoteEntry{Path: "docs/remote.txt", Kind: "file", Size: 17, Version: 2}
+	entries["docs/remote.txt"] = RemoteEntry{Path: "docs/remote.txt", Kind: "file", Size: 17, Version: 3}
 	mu.Unlock()
+	if err := os.WriteFile(remoteFile, []byte("another local edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err = Sync(context.Background(), root, state, remote)
+	if err != nil || report.Conflicts != 1 {
+		t.Fatalf("simultaneous edit conflict=%+v err=%v", report, err)
+	}
+	if data, err := os.ReadFile(remoteFile); err != nil || string(data) != "another local edit" {
+		t.Fatalf("conflicting local bytes changed: %q, %v", data, err)
+	}
+	if err := os.WriteFile(remoteFile, []byte("local edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	report, err = Sync(context.Background(), root, state, remote)
 	if err != nil || report.Downloaded != 1 || report.Conflicts != 0 {
 		t.Fatalf("remote update sync=%+v err=%v", report, err)
