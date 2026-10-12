@@ -108,7 +108,7 @@ func (s *Store) ForUser(id int64) (*Store, error) {
 }
 
 func validPart(part string) bool {
-	if part == "" || part == "." || part == ".." || part == trashDir || part == ".homeos-users" || part == ".homeos-staging" || part == ".homeos-versions" || strings.HasPrefix(part, ".homeos-upload-") ||
+	if part == "" || part == "." || part == ".." || part == trashDir || part == ".homeos-users" || part == ".homeos-staging" || part == ".homeos-versions" || strings.HasPrefix(part, ".homeos-upload-") || strings.HasPrefix(part, ".homeos-restore-") ||
 		strings.ContainsAny(part, `\/:*?"<>|`) || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
 		return false
 	}
@@ -179,7 +179,7 @@ func (s *Store) List(path string) ([]Entry, error) {
 	}
 	entries := make([]Entry, 0, len(items))
 	for _, item := range items {
-		if item.Name() == trashDir || item.Name() == ".homeos-users" || item.Name() == ".homeos-staging" || item.Name() == ".homeos-versions" || strings.HasPrefix(item.Name(), ".homeos-upload-") || item.Type()&os.ModeSymlink != 0 {
+		if item.Name() == trashDir || item.Name() == ".homeos-users" || item.Name() == ".homeos-staging" || item.Name() == ".homeos-versions" || strings.HasPrefix(item.Name(), ".homeos-upload-") || strings.HasPrefix(item.Name(), ".homeos-restore-") || item.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		info, err := item.Info()
