@@ -14,6 +14,8 @@ The proposed foundation is:
 
 HomeOS has a loopback-only Go API, PostgreSQL-backed server metadata, a React dashboard with native Windows host metrics, and Docker Compose packaging. SQLite remains an explicit standalone-development option, not a second server source of truth. The first HomeDrive v0.2 slice adds authenticated file listing, folders, uploads, and downloads. The metadata schema now reserves durable records for versions, shares, resumable upload sessions, and an incremental change feed; service APIs for those records remain upcoming work. Broader monitoring and production hardening are still to come. The Docker image has not been run on the target Windows machine because WSL 2 is not installed.
 
+Native Windows first-install setup is available at `scripts/setup-windows-postgres.ps1`. It invokes the PostgreSQL 17 installer when needed, provisions an isolated HomeOS database/role, builds the app, and registers HomeOS to start at Windows user sign-in. The installer and administrator-account creation require interactive password entry; see [local development](docs/development.md) for prerequisites and safeguards.
+
 The first milestone (`v0.1`) will focus on HomeCore, authentication, the dashboard, and basic monitoring. See the [project concept and technical design report](HomeOS_Project_Report.md) for the full scope, architecture, roadmap, and risks.
 
 The [v0.1 requirements and acceptance checklist](docs/v0.1-requirements.md) defines the first buildable milestone.

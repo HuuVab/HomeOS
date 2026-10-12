@@ -58,6 +58,10 @@ Open `http://127.0.0.1:8080`.
 
 This checkout's local PostgreSQL deployment can be started with `powershell -File .\scripts\start-homeos-postgres.ps1` from the repository root. It connects as the dedicated `homeos_app` role to the `homeos` database, reads its password from ignored `backend/secrets/postgres-password`, and reuses `backend/data/files`. The old SQLite database is retained only as a rollback backup; existing users must sign in again because sessions were not migrated. PostgreSQL 17 must be running before launching the script.
 
+For a fresh native Windows install, run `powershell -File .\scripts\setup-windows-postgres.ps1` interactively from the repository root (elevate if PostgreSQL is not installed). The script checks for PostgreSQL 17 and invokes the exact WinGet package's interactive installer only when absent; you must choose/enter the PostgreSQL administrator password in that installer. It then prompts once for that password to provision a dedicated non-superuser `homeos_app` role and `homeos` database, saves only the generated app-role password in the ignored local secret file with a restricted ACL, builds the frontend and backend, and prompts for a HomeOS administrator account on an empty database. Go, Node.js/npm, and WinGet must already be installed. Existing databases and role passwords are not overwritten.
+
+Setup also ensures the PostgreSQL Windows service starts automatically and registers a `HomeOS PostgreSQL` scheduled task for the current Windows user. HomeOS starts at **user sign-in**, not before login. Re-running setup preserves a matching task and rejects an unrelated task of the same name. The task runs the compiled `backend/bin/homeos.exe`; run setup again after updating backend code to rebuild that executable. The launcher waits up to one minute for PostgreSQL before starting HomeOS.
+
 ## Verify
 
 ```powershell
