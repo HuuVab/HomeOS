@@ -186,13 +186,13 @@ func main() {
 		}
 		apply := len(os.Args) == 4
 		report, err := db.RepairDriveCatalog(ownerID, entries, apply)
-		fmt.Printf("Owner %d: %d entries, %d missing on disk, %d missing in catalog, %d mismatched, %d missing checksums\n",
-			ownerID, report.Entries, report.MissingOnDisk, report.MissingInCatalog, report.Mismatched, report.MissingChecksums)
+		fmt.Printf("Owner %d: %d entries, %d missing on disk, %d missing in catalog, %d mismatched (%d unverified), %d missing checksums\n",
+			ownerID, report.Entries, report.MissingOnDisk, report.MissingInCatalog, report.Mismatched, report.Unverified, report.MissingChecksums)
 		if err != nil {
 			log.Fatal("repair refused: ", err)
 		}
 		if apply {
-			fmt.Println("Catalog checksums and version snapshots backfilled. Restart the server before editing files.")
+			fmt.Println("Safe catalog repairs, checksums, and version snapshots applied. Restart the server before editing files.")
 		} else {
 			fmt.Println("Dry run only. Stop the server, back up PostgreSQL and HomeDrive files, then re-run with --apply.")
 		}
