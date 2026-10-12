@@ -12,7 +12,9 @@ import (
 
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
 	"github.com/HuuVab/HomeOS/backend/internal/metadatapb"
+	"github.com/HuuVab/HomeOS/backend/internal/redisaccel"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
+	"github.com/alicebob/miniredis/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -63,7 +65,13 @@ func TestPostgresMetadataServiceIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer files.Close()
-	client, close, err := NewInProcessClient(db, files)
+	redisServer := miniredis.RunT(t)
+	cache, err := redisaccel.Open(context.Background(), "redis://"+redisServer.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.Close()
+	client, close, err := NewInProcessClient(db, files, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +84,18 @@ func TestPostgresMetadataServiceIntegration(t *testing.T) {
 	if err != nil || len(listed.GetEntries()) != 1 || listed.GetEntries()[0].GetPath() != "docs" {
 		t.Fatalf("list files = %+v, %v", listed, err)
 	}
+	if _, err := client.CreateFolder(context.Background(), &metadatapb.CreateFolderRequest{OwnerId: 1, Path: "more"}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = client.ListFiles(context.Background(), &metadatapb.ListFilesRequest{OwnerId: 1})
+	if err != nil || len(listed.GetEntries()) != 2 {
+		t.Fatalf("list after cache invalidation = %+v, %v", listed, err)
+	}
 	if _, err := client.GetFile(context.Background(), &metadatapb.GetFileRequest{OwnerId: 2, Path: "docs"}); status.Code(err) != codes.NotFound {
 		t.Fatalf("cross-owner file lookup = %v", err)
 	}
 	events, err := db.ChangesAfter(1, 0, 10)
-	if err != nil || len(events) != 1 || events[0].Operation != "create" {
+	if err != nil || len(events) != 2 || events[0].Operation != "create" {
 		t.Fatalf("change feed = %+v, %v", events, err)
 	}
 }
