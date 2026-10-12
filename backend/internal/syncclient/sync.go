@@ -22,14 +22,15 @@ import (
 const maxPrototypeFileBytes = 32 << 20
 
 type Report struct {
-	Downloaded int
-	Uploaded   int
-	Updated    int
-	Deleted    int
-	Folders    int
-	Conflicts  int
-	Retried    int
-	Cursor     int64
+	Downloaded   int
+	Uploaded     int
+	Updated      int
+	Deleted      int
+	RemovedLocal int
+	Folders      int
+	Conflicts    int
+	Retried      int
+	Cursor       int64
 }
 
 func Sync(ctx context.Context, directory string, state *State, remote *Remote) (Report, error) {
@@ -221,6 +222,75 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 		}
 		report.Downloaded++
 	}
+	missing := make([]string, 0)
+	for name := range baselines {
+		if _, exists := server[name]; !exists {
+			missing = append(missing, name)
+		}
+	}
+	sort.Slice(missing, func(i, j int) bool {
+		if pathDepth(missing[i]) != pathDepth(missing[j]) {
+			return pathDepth(missing[i]) < pathDepth(missing[j])
+		}
+		return missing[i] < missing[j]
+	})
+	archivedFolders := make([]string, 0)
+	for _, name := range missing {
+		if _, hasPending := pending[name]; hasPending {
+			continue
+		}
+		archivedWithParent := false
+		for _, parent := range archivedFolders {
+			if strings.HasPrefix(name, parent+"/") {
+				archivedWithParent = true
+				break
+			}
+		}
+		if archivedWithParent {
+			if err := state.RemoveBaseline(name); err != nil {
+				return report, err
+			}
+			continue
+		}
+		current, exists := local[name]
+		if !exists {
+			if err := state.RemoveBaseline(name); err != nil {
+				return report, err
+			}
+			continue
+		}
+		baseline := baselines[name]
+		clean := current.Kind == baseline.Kind && (current.Kind != "file" || current.Hash == baseline.LocalHash)
+		if clean && current.Kind == "folder" {
+			for child, localChild := range local {
+				if !strings.HasPrefix(child, name+"/") {
+					continue
+				}
+				childBase, known := baselines[child]
+				if _, queued := pending[child]; queued || !known || localChild.Kind != childBase.Kind || (localChild.Kind == "file" && localChild.Hash != childBase.LocalHash) {
+					clean = false
+					break
+				}
+			}
+		}
+		if !clean {
+			if err := state.MarkConflict(name, "remote item disappeared but local contents changed"); err != nil {
+				return report, err
+			}
+			report.Conflicts++
+			continue
+		}
+		if err := archiveRemoteDeletion(root, name); err != nil {
+			return report, err
+		}
+		if err := state.RemoveBaseline(name); err != nil {
+			return report, err
+		}
+		if current.Kind == "folder" {
+			archivedFolders = append(archivedFolders, name)
+		}
+		report.RemovedLocal++
+	}
 	queuedNames := make([]string, 0, len(pending))
 	for name := range pending {
 		queuedNames = append(queuedNames, name)
@@ -383,6 +453,18 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 		}
 	}
 	return report, nil
+}
+
+func archiveRemoteDeletion(root *os.Root, name string) error {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return err
+	}
+	destination := path.Join(stateDir, "removed", hex.EncodeToString(token[:]), name)
+	if err := root.MkdirAll(filepath.FromSlash(path.Dir(destination)), 0700); err != nil {
+		return err
+	}
+	return root.Rename(filepath.FromSlash(name), filepath.FromSlash(destination))
 }
 
 func pathDepth(name string) int {
