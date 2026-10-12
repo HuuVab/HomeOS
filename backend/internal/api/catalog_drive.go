@@ -2,8 +2,10 @@ package api
 
 import (
 	"archive/zip"
+	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -453,6 +455,129 @@ func registerCatalogDriveRoutes(mux *http.ServeMux, db *store.Store, files *driv
 		if err != nil {
 			return
 		}
+	})
+	mux.HandleFunc("POST /api/v1/drive/uploads", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			Path        string `json:"path"`
+			Size        int64  `json:"size"`
+			Fingerprint string `json:"fingerprint"`
+		}
+		if !jsonBody(w, r, &payload) {
+			return
+		}
+		if !drive.ValidCatalogPath(payload.Path) || payload.Size < 0 || len(payload.Fingerprint) != 64 {
+			driveError(w, drive.ErrInvalidPath)
+			return
+		}
+		if _, err := hex.DecodeString(payload.Fingerprint); err != nil {
+			driveError(w, drive.ErrInvalidPath)
+			return
+		}
+		if _, err := db.FileEntry(ownerID, payload.Path); err == nil {
+			driveError(w, os.ErrExist)
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			driveError(w, err)
+			return
+		}
+		if parent := path.Dir(payload.Path); parent != "." {
+			entry, err := db.FileEntry(ownerID, parent)
+			if err != nil {
+				driveError(w, err)
+				return
+			}
+			if entry.Kind != "folder" {
+				driveError(w, drive.ErrInvalidPath)
+				return
+			}
+		}
+		value, err := usage()
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		if payload.Size > value.MaxFileBytes {
+			driveError(w, drive.ErrTooLarge)
+			return
+		}
+		if payload.Size > value.QuotaBytes-value.UsedBytes-value.ReservedBytes {
+			driveError(w, drive.ErrQuotaExceeded)
+			return
+		}
+		var token [16]byte
+		if _, err := rand.Read(token[:]); err != nil {
+			driveError(w, err)
+			return
+		}
+		session := drive.UploadSession{ID: hex.EncodeToString(token[:]), Path: payload.Path, Size: payload.Size, Fingerprint: payload.Fingerprint}
+		if err := files.CreateCatalogStage(session.ID); err != nil {
+			driveError(w, err)
+			return
+		}
+		if err := db.UpsertUploadSession(ownerID, session); err != nil {
+			files.RemoveCatalogStage(session.ID)
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, session)
+	})
+	mux.HandleFunc("PATCH /api/v1/drive/uploads/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		offset, err := strconv.ParseInt(r.Header.Get("X-Upload-Offset"), 10, 64)
+		if err != nil || offset < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_offset", "Expected a non-negative upload offset")
+			return
+		}
+		session, err := db.PendingUploadSession(ownerID, r.PathValue("id"))
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		if offset != session.Offset {
+			driveError(w, drive.ErrOffset)
+			return
+		}
+		next, err := files.AppendCatalogStage(session.ID, offset, session.Size, r.Body, r.Header.Get("X-Chunk-SHA256"))
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		if err := db.SetUploadOffset(ownerID, session.ID, next); err != nil {
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int64{"offset": next})
+	})
+	mux.HandleFunc("POST /api/v1/drive/uploads/{id}/complete", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		session, err := db.PendingUploadSession(ownerID, r.PathValue("id"))
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		if session.Offset != session.Size {
+			driveError(w, drive.ErrOffset)
+			return
+		}
+		checksum, err := files.FinishCatalogStage(session.ID, session.Size, session.Fingerprint)
+		if err != nil {
+			driveError(w, err)
+			return
+		}
+		if _, err := db.CatalogCommitFile(ownerID, session.Path, checksum, session.Size, 0, session.ID); err != nil {
+			driveError(w, err)
+			return
+		}
+		if err := files.RemoveCatalogStage(session.ID); err != nil { /* Recovery will sweep the orphan stage. */
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 }
 
