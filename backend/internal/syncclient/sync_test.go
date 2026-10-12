@@ -119,4 +119,18 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 	if unchanged != "remote" {
 		t.Fatalf("remote file was overwritten: %q", unchanged)
 	}
+	if err := os.WriteFile(remoteFile, []byte("remote"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	contents["docs/remote.txt"] = "changed on server"
+	entries["docs/remote.txt"] = RemoteEntry{Path: "docs/remote.txt", Kind: "file", Size: 17, Version: 2}
+	mu.Unlock()
+	report, err = Sync(context.Background(), root, state, remote)
+	if err != nil || report.Conflicts != 1 {
+		t.Fatalf("remote update conflict sync=%+v err=%v", report, err)
+	}
+	if data, err := os.ReadFile(remoteFile); err != nil || string(data) != "remote" {
+		t.Fatalf("local file changed without approval: %q err=%v", data, err)
+	}
 }
