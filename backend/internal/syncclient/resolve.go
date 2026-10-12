@@ -89,7 +89,7 @@ func ResolveFileConflict(ctx context.Context, directory string, state *State, re
 		return err
 	}
 	if info.Size() > maxPrototypeFileBytes {
-		return errors.New("file exceeds the 2 GiB sync limit")
+		return errors.New("file exceeds the sync transfer range")
 	}
 	fullHash := sha256.New()
 	if _, err := io.Copy(fullHash, file); err != nil {

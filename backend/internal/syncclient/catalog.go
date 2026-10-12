@@ -122,9 +122,6 @@ func remoteCatalog(ctx context.Context, state *State, remote *Remote) (map[strin
 			}
 		}
 	}
-	if len(entries) > 10000 {
-		return nil, 0, errors.New("sync prototype is limited to 10,000 entries")
-	}
 	if err := state.SaveRemoteEntries(entries, cursor); err != nil {
 		return nil, 0, err
 	}

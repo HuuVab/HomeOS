@@ -20,7 +20,9 @@ import (
 )
 
 const (
-	maxPrototypeFileBytes = 2 << 30
+	// The server's per-account policy is authoritative. Keep only an int64-safe
+	// transfer guard here, so uncapped accounts are not blocked by the client.
+	maxPrototypeFileBytes = int64(1<<62 - 1)
 	resumableThreshold    = 32 << 20
 )
 
@@ -130,7 +132,7 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 			}
 			if queued.Operation == "update" && exists && known && current.Kind == "file" && entry.Kind == "file" && current.Hash == queued.LocalHash && entry.Version == queued.BaseVersion {
 				if current.Size > maxPrototypeFileBytes {
-					if err := state.MarkConflict(name, "file exceeds the 2 GiB sync limit"); err != nil {
+					if err := state.MarkConflict(name, "file exceeds the sync transfer range"); err != nil {
 						return report, err
 					}
 					report.Conflicts++
@@ -211,7 +213,7 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 			continue
 		}
 		if entry.Size > maxPrototypeFileBytes {
-			if err := state.MarkConflict(name, "file exceeds the 2 GiB sync limit"); err != nil {
+			if err := state.MarkConflict(name, "file exceeds the sync transfer range"); err != nil {
 				return report, err
 			}
 			report.Conflicts++
@@ -401,7 +403,7 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 		if entry.Kind == "folder" {
 			err = remote.CreateFolder(ctx, name)
 		} else if entry.Size > maxPrototypeFileBytes {
-			err = errors.New("file exceeds the 2 GiB sync limit")
+			err = errors.New("file exceeds the sync transfer range")
 		} else {
 			var file *os.File
 			file, err = root.Open(filepath.FromSlash(name))
@@ -469,7 +471,7 @@ func downloadFile(ctx context.Context, root *os.Root, remote *Remote, name strin
 		return "", fmt.Errorf("download %q: HTTP %d", name, response.StatusCode)
 	}
 	if response.ContentLength > maxPrototypeFileBytes {
-		return "", errors.New("download exceeds the 2 GiB sync limit")
+		return "", errors.New("download exceeds the sync transfer range")
 	}
 	if err := root.MkdirAll(filepath.FromSlash(path.Dir(name)), 0700); err != nil {
 		return "", err
@@ -497,7 +499,7 @@ func downloadFile(ctx context.Context, root *os.Root, remote *Remote, name strin
 		return "", closeErr
 	}
 	if written > maxPrototypeFileBytes {
-		return "", errors.New("download exceeds the 2 GiB sync limit")
+		return "", errors.New("download exceeds the sync transfer range")
 	}
 	if err := root.Rename(temporary, filepath.FromSlash(name)); err != nil {
 		return "", err

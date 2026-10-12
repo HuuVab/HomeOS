@@ -163,9 +163,6 @@ func (r *Remote) ListAll(ctx context.Context) (map[string]RemoteEntry, error) {
 				caseFolded[folded] = entry.Path
 			}
 			result[entry.Path] = entry
-			if len(result) > 10000 {
-				return nil, errors.New("sync prototype is limited to 10,000 entries")
-			}
 			if entry.Kind == "folder" {
 				folders = append(folders, entry.Path)
 			}
@@ -218,9 +215,6 @@ func (r *Remote) ListTree(ctx context.Context, folder string) (map[string]Remote
 				return nil, fmt.Errorf("server repeated path %q", entry.Path)
 			}
 			result[entry.Path] = entry
-			if len(result) > 10000 {
-				return nil, errors.New("sync prototype is limited to 10,000 entries")
-			}
 			if entry.Kind == "folder" {
 				queue = append(queue, entry.Path)
 			}
