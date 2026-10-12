@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -16,7 +17,9 @@ import (
 	"github.com/HuuVab/HomeOS/backend/internal/auth"
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
 	"github.com/HuuVab/HomeOS/backend/internal/metadata"
+	"github.com/HuuVab/HomeOS/backend/internal/redisaccel"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestPostgresGatewayUsesMetadataRPC(t *testing.T) {
@@ -66,12 +69,18 @@ func TestPostgresGatewayUsesMetadataRPC(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer files.Close()
-	client, close, err := metadata.NewInProcessClient(db, files)
+	redisServer := miniredis.RunT(t)
+	cache, err := redisaccel.Open(context.Background(), "redis://"+redisServer.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.Close()
+	client, close, err := metadata.NewInProcessClient(db, files, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer close()
-	handler := NewHandler("", db, testCollector{}, files, client)
+	handler := NewHandlerWithRedis("", db, testCollector{}, files, cache, client)
 	login := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"gateway_admin","password":"gateway-test-password"}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -101,5 +110,20 @@ func TestPostgresGatewayUsesMetadataRPC(t *testing.T) {
 	handler.ServeHTTP(listed, request)
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"path":"grpc-folder"`) {
 		t.Fatalf("list = %d: %s", listed.Code, listed.Body.String())
+	}
+	upload := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/drive/files?path=grpc-folder%2Fnote.txt", strings.NewReader("cached listing must refresh"))
+	request.Header.Set("X-CSRF-Token", session.CSRFToken)
+	request.AddCookie(cookie)
+	handler.ServeHTTP(upload, request)
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("upload = %d: %s", upload.Code, upload.Body.String())
+	}
+	listed = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/drive?path=grpc-folder", nil)
+	request.AddCookie(cookie)
+	handler.ServeHTTP(listed, request)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"path":"grpc-folder/note.txt"`) {
+		t.Fatalf("list after upload = %d: %s", listed.Code, listed.Body.String())
 	}
 }
