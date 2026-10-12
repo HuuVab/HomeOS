@@ -1,7 +1,8 @@
 # HomeDrive storage consistency redesign
 
-Status: design and durability prerequisite only. The current filesystem-first
-mutation path remains active; this document does not claim it is atomic.
+Status: implemented for PostgreSQL owners whose `owner_storage.format` is
+`blobs`. The local owner was migrated on 2026-10-12. Pre-migration owners and
+SQLite standalone deployments retain the legacy filesystem-first path.
 
 ## Authority and visibility
 
@@ -31,33 +32,36 @@ excluded while the reference set is obtained and deletion completes.
 4. Discard staging bytes after a rejected transaction. Sweep abandoned staging
    bytes after restart; do not infer committed metadata from their presence.
 
-Folder move/copy/Trash operations must update all affected catalog rows in one
-transaction. Moving a file preserves an identity separate from its path so
-version history follows it. A restore publishes a new revision pointing at an
-already verified blob. Permanent deletion removes catalog references first;
+Folder move/copy/Trash operations update affected catalog rows in one
+transaction. Version history remains path-based: moving a file starts history
+at its new path. A restore publishes a new revision pointing at an
+already committed blob. Permanent deletion removes catalog references first;
 retention-aware garbage collection reclaims bytes later.
 
 ## Recovery and audit
 
 Startup replays no filesystem-to-database reconciliation. It checks incomplete
 upload transactions against PostgreSQL, discards orphan staging files, and
-verifies referenced blob existence and size. A full checksum audit remains an
-explicit maintenance operation, not a per-request or startup prerequisite.
-Any missing or corrupted committed blob makes affected content unavailable
-with a diagnostic; it must not be replaced by an uncommitted on-disk file.
+verifies referenced blob existence and size. The offline migration verifies
+full SHA-256 once; normal reconciliation does not hash every file. Missing
+or wrong-size committed blobs make affected content unavailable with a storage
+error and are never replaced by an uncommitted on-disk file. Same-size external
+bit corruption is not detected by the startup check and requires a separate
+full checksum audit. The filesystem and PostgreSQL do not share a literal
+transaction; durability still depends on the filesystem honoring file sync
+and rename semantics after a sudden power loss.
 
 ## Migration and rollback
 
 Before switching the live server, stop writes and make a paired `pg_dump` and
-filesystem backup. Stream each existing active and trashed file to immutable
-blobs, verify size and SHA-256, and populate a new catalog schema without
-changing the old tables. Compare counts and byte totals, then switch reads
-and mutations behind an explicit storage-format version. Keep the old tree and
-schema until the new server passes restart, restore, upload, Trash, retention,
-and crash-injection tests. Rollback requires the paired backup; do not mix a
-new catalog with an old byte tree.
+filesystem backup. Run `homeos migrate-blobs <owner-id>` for a dry run, then
+`homeos migrate-blobs <owner-id> --apply`. It verifies existing active and
+trashed content against committed metadata, creates immutable blobs, and
+atomically activates the owner format. The local backup is under
+`backend/data/backups/blob-cutover-20261012-183014`. Rollback requires the
+paired backup; do not mix a new catalog with an old byte tree.
 
-The migration must preserve the existing 2 GiB upload path. PostgreSQL `bytea`
-is not the primary file store. The older `.homeos-upload-*.json` markers and
-mutable live/Trash paths are removed only after equivalent catalog-backed
-flows are implemented and the old-mode migration is verified.
+The existing 2 GiB upload path remains filesystem-backed for bytes;
+PostgreSQL `bytea` is not the primary file store. Blob-mode uploads use
+PostgreSQL session rows and disposable staging bytes, without JSON sidecars.
+Legacy files and sidecars are retained only for pre-migration and SQLite mode.
