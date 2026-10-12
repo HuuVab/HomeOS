@@ -122,6 +122,14 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 	if err := os.WriteFile(remoteFile, []byte("remote"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	report, err = Sync(context.Background(), root, state, remote)
+	if err != nil || report.Conflicts != 0 {
+		t.Fatalf("resolved local edit sync=%+v err=%v", report, err)
+	}
+	conflicts, err = state.Conflicts()
+	if err != nil || len(conflicts) != 0 {
+		t.Fatalf("resolved conflicts=%+v err=%v", conflicts, err)
+	}
 	mu.Lock()
 	contents["docs/remote.txt"] = "changed on server"
 	entries["docs/remote.txt"] = RemoteEntry{Path: "docs/remote.txt", Kind: "file", Size: 17, Version: 2}
