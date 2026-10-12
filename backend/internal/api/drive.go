@@ -430,14 +430,34 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			return
 		}
 		name := r.URL.Query().Get("path")
-		if !checkTarget(w, r, name) {
+		replacing := r.Header.Get("X-Source-Version") != ""
+		if replacing {
+			if !checkSource(w, r, name) {
+				return
+			}
+			entry, err := fileEntry(r, name)
+			if err != nil || entry.Kind != "file" {
+				driveError(w, drive.ErrInvalidPath)
+				return
+			}
+		} else if !checkTarget(w, r, name) {
 			return
 		}
-		if err := files.Upload(name, r.Body); err != nil {
+		var err error
+		if replacing {
+			err = files.Replace(name, r.Body)
+		} else {
+			err = files.Upload(name, r.Body)
+		}
+		if err != nil {
 			driveError(w, err)
 			return
 		}
-		w.WriteHeader(http.StatusCreated)
+		if replacing {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			w.WriteHeader(http.StatusCreated)
+		}
 	})
 	mux.HandleFunc("POST /api/v1/drive/uploads", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r, true) {
