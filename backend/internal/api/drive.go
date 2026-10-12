@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -128,6 +129,55 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			return
 		}
 		writeJSON(w, http.StatusOK, usage)
+	})
+	mux.HandleFunc("GET /api/v1/drive/versions", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, false) {
+			return
+		}
+		name := r.URL.Query().Get("path")
+		entry, err := fileEntry(r, name)
+		if err != nil || entry.Kind != "file" {
+			driveError(w, os.ErrNotExist)
+			return
+		}
+		versions, err := db.FileVersions(ownerID, name)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "File versions are unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
+	})
+	mux.HandleFunc("POST /api/v1/drive/versions/restore", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r, true) {
+			return
+		}
+		var payload struct {
+			Path    string `json:"path"`
+			Version int64  `json:"version"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF || payload.Version < 1 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Expected a file path and version")
+			return
+		}
+		if !checkSource(w, r, payload.Path) {
+			return
+		}
+		version, err := db.FileVersion(ownerID, payload.Path, payload.Version)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				driveError(w, os.ErrNotExist)
+			} else {
+				writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "File version is unavailable")
+			}
+			return
+		}
+		if err := files.RestoreVersion(payload.Path, version.Checksum, version.Size); err != nil {
+			driveError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"restored": true})
 	})
 	mux.HandleFunc("GET /api/v1/drive/changes", func(w http.ResponseWriter, r *http.Request) {
 		user, _, _, ok := authenticate(w, r, db)
