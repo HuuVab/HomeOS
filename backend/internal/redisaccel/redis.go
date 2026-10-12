@@ -56,7 +56,7 @@ func (l *Layer) AllowLogin(ctx context.Context, remote string) (bool, error) {
 	return count <= 10, err
 }
 
-func (l *Layer) generation(ctx context.Context, ownerID int64) (string, error) {
+func (l *Layer) Generation(ctx context.Context, ownerID int64) (string, error) {
 	value, err := l.client.Get(ctx, fmt.Sprintf("homeos:drive:gen:%d", ownerID)).Result()
 	if err == redis.Nil {
 		return "0", nil
@@ -64,44 +64,36 @@ func (l *Layer) generation(ctx context.Context, ownerID int64) (string, error) {
 	return value, err
 }
 
-func (l *Layer) listKey(ctx context.Context, ownerID int64, folder string) (string, error) {
-	generation, err := l.generation(ctx, ownerID)
-	if err != nil {
-		return "", err
-	}
+func listKey(ownerID int64, folder, generation string) string {
 	digest := sha256.Sum256([]byte(folder))
-	return fmt.Sprintf("homeos:drive:list:%d:%s:%s", ownerID, generation, hex.EncodeToString(digest[:])), nil
+	return fmt.Sprintf("homeos:drive:list:%d:%s:%s", ownerID, generation, hex.EncodeToString(digest[:]))
 }
 
-func (l *Layer) ListFiles(ctx context.Context, ownerID int64, folder string) ([]drive.Entry, bool, error) {
-	key, err := l.listKey(ctx, ownerID, folder)
+func (l *Layer) ListFiles(ctx context.Context, ownerID int64, folder string) ([]drive.Entry, bool, string, error) {
+	generation, err := l.Generation(ctx, ownerID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
-	data, err := l.client.Get(ctx, key).Bytes()
+	data, err := l.client.Get(ctx, listKey(ownerID, folder, generation)).Bytes()
 	if err == redis.Nil {
-		return nil, false, nil
+		return nil, false, generation, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	var entries []drive.Entry
 	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
-	return entries, true, nil
+	return entries, true, generation, nil
 }
 
-func (l *Layer) StoreFiles(ctx context.Context, ownerID int64, folder string, entries []drive.Entry) error {
-	key, err := l.listKey(ctx, ownerID, folder)
-	if err != nil {
-		return err
-	}
+func (l *Layer) StoreFiles(ctx context.Context, ownerID int64, folder, generation string, entries []drive.Entry) error {
 	data, err := json.Marshal(entries)
 	if err != nil {
 		return err
 	}
-	return l.client.Set(ctx, key, data, listTTL).Err()
+	return l.client.Set(ctx, listKey(ownerID, folder, generation), data, listTTL).Err()
 }
 
 // InvalidateOwner changes the namespace for every cached folder of one owner.

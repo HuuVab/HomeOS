@@ -37,20 +37,24 @@ func TestListCacheIsOwnerScopedAndInvalidated(t *testing.T) {
 	layer := testLayer(t)
 	ctx := context.Background()
 	entries := []drive.Entry{{Path: "docs", Name: "docs", Kind: "folder", Version: 3}}
-	if err := layer.StoreFiles(ctx, 1, "", entries); err != nil {
+	generation, err := layer.Generation(ctx, 1)
+	if err != nil {
 		t.Fatal(err)
 	}
-	got, hit, err := layer.ListFiles(ctx, 1, "")
+	if err := layer.StoreFiles(ctx, 1, "", generation, entries); err != nil {
+		t.Fatal(err)
+	}
+	got, hit, _, err := layer.ListFiles(ctx, 1, "")
 	if err != nil || !hit || len(got) != 1 || got[0].Version != 3 {
 		t.Fatalf("cached entries=%+v hit=%t err=%v", got, hit, err)
 	}
-	if _, hit, err := layer.ListFiles(ctx, 2, ""); err != nil || hit {
+	if _, hit, _, err := layer.ListFiles(ctx, 2, ""); err != nil || hit {
 		t.Fatalf("other owner cache hit=%t err=%v", hit, err)
 	}
 	if err := layer.InvalidateOwner(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, hit, err := layer.ListFiles(ctx, 1, ""); err != nil || hit {
+	if _, hit, _, err := layer.ListFiles(ctx, 1, ""); err != nil || hit {
 		t.Fatalf("stale cache hit=%t err=%v", hit, err)
 	}
 }
