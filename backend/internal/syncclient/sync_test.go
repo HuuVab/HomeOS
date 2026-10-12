@@ -182,4 +182,39 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 	if remains {
 		t.Fatal("deleted file remains on server")
 	}
+	mu.Lock()
+	entries["docs/vanish.txt"] = RemoteEntry{Path: "docs/vanish.txt", Kind: "file", Size: 6, Version: 1}
+	contents["docs/vanish.txt"] = "vanish"
+	mu.Unlock()
+	report, err = Sync(context.Background(), root, state, remote)
+	if err != nil || report.Downloaded != 1 {
+		t.Fatalf("new remote file sync=%+v err=%v", report, err)
+	}
+	mu.Lock()
+	delete(entries, "docs/vanish.txt")
+	delete(contents, "docs/vanish.txt")
+	mu.Unlock()
+	report, err = Sync(context.Background(), root, state, remote)
+	if err != nil || report.RemovedLocal != 1 {
+		t.Fatalf("remote deletion sync=%+v err=%v", report, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "docs", "vanish.txt")); !os.IsNotExist(err) {
+		t.Fatalf("remotely removed file remains live: %v", err)
+	}
+	removedRoot := filepath.Join(root, stateDir, "removed")
+	var recovered bool
+	if err := filepath.WalkDir(removedRoot, func(name string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Name() == "vanish.txt" {
+			data, err := os.ReadFile(name)
+			if err == nil && string(data) == "vanish" {
+				recovered = true
+			}
+		}
+		return nil
+	}); err != nil || !recovered {
+		t.Fatalf("recovery copy missing: recovered=%t err=%v", recovered, err)
+	}
 }
