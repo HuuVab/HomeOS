@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -68,6 +69,24 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 		case "/api/v1/drive/changes":
 			_, _ = w.Write([]byte(`{"events":[],"nextCursor":0}`))
+		case "/api/v1/drive/trash":
+			var payload struct { Path string `json:"path"` }
+			if r.Header.Get("X-CSRF-Token") != "token" || json.NewDecoder(r.Body).Decode(&payload) != nil {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			entry, exists := entries[payload.Path]
+			if !exists {
+				http.NotFound(w, r)
+				return
+			}
+			if r.Header.Get("X-Source-Version") != strconv.FormatInt(entry.Version, 10) {
+				w.WriteHeader(http.StatusPreconditionFailed)
+				return
+			}
+			delete(entries, payload.Path)
+			delete(contents, payload.Path)
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
 		}
@@ -149,5 +168,18 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 	}
 	if data, err := os.ReadFile(remoteFile); err != nil || string(data) != "changed on server" {
 		t.Fatalf("unchanged local file did not receive remote update: %q err=%v", data, err)
+	}
+	if err := os.Remove(remoteFile); err != nil {
+		t.Fatal(err)
+	}
+	report, err = Sync(context.Background(), root, state, remote)
+	if err != nil || report.Deleted != 1 || report.Conflicts != 0 {
+		t.Fatalf("local deletion sync=%+v err=%v", report, err)
+	}
+	mu.Lock()
+	_, remains := entries["docs/remote.txt"]
+	mu.Unlock()
+	if remains {
+		t.Fatal("deleted file remains on server")
 	}
 }
