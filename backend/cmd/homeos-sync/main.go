@@ -24,10 +24,10 @@ func main() {
 
 func run(arguments []string) error {
 	if len(arguments) < 2 {
-		return errors.New("usage: homeos-sync <init|scan|status|sync|watch> <existing-local-folder> [--server URL] [--user USERNAME]")
+		return errors.New("usage: homeos-sync <init|scan|status|sync|watch|resolve> <existing-local-folder> [--server URL] [--user USERNAME]")
 	}
 	command, directory := arguments[0], arguments[1]
-	if command != "init" && command != "scan" && command != "status" && command != "sync" && command != "watch" {
+	if command != "init" && command != "scan" && command != "status" && command != "sync" && command != "watch" && command != "resolve" {
 		return fmt.Errorf("unknown command %q", command)
 	}
 	absolute, err := filepath.Abs(directory)
@@ -38,6 +38,8 @@ func run(arguments []string) error {
 	serverURL := flags.String("server", "http://127.0.0.1:8080", "HomeOS server origin")
 	username := flags.String("user", "", "HomeOS username")
 	interval := flags.Duration("interval", 30*time.Second, "polling interval for watch mode")
+	conflictPath := flags.String("path", "", "conflicting file path for resolve mode")
+	choice := flags.String("choice", "", "keep-local or keep-remote for resolve mode")
 	if err := flags.Parse(arguments[2:]); err != nil {
 		return err
 	}
@@ -46,6 +48,9 @@ func run(arguments []string) error {
 	}
 	if command == "watch" && *interval < 5*time.Second {
 		return errors.New("watch interval must be at least 5 seconds")
+	}
+	if command == "resolve" && (*conflictPath == "" || (*choice != "keep-local" && *choice != "keep-remote")) {
+		return errors.New("resolve requires --path FILE and --choice keep-local|keep-remote")
 	}
 	state, err := syncclient.OpenState(absolute)
 	if err != nil {
@@ -93,6 +98,15 @@ func run(arguments []string) error {
 		return err
 	}
 	clear(password)
+	if command == "resolve" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if err := syncclient.ResolveFileConflict(ctx, absolute, state, remote, *conflictPath, *choice); err != nil {
+			return err
+		}
+		fmt.Printf("Resolved file conflict for %s using %s.\n", *conflictPath, *choice)
+		return printStatus(state)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	for {
