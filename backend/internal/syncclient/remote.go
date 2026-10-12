@@ -3,6 +3,9 @@ package syncclient
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +14,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -270,6 +274,92 @@ func (r *Remote) Trash(ctx context.Context, name string, version int64) error {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("trash %q: HTTP %d", name, response.StatusCode)
+	}
+	return nil
+}
+
+// UploadResumable sends large new files in verified chunks. Retrying with the
+// same file resumes the server session by its stable sample fingerprint.
+func (r *Remote) UploadResumable(ctx context.Context, name string, file *os.File, size int64) error {
+	if size < 0 {
+		return errors.New("negative upload size")
+	}
+	sampleSize := int64(64 << 10)
+	if size < sampleSize {
+		sampleSize = size
+	}
+	first := make([]byte, sampleSize)
+	last := make([]byte, sampleSize)
+	if _, err := file.ReadAt(first, 0); err != nil {
+		return err
+	}
+	if _, err := file.ReadAt(last, size-sampleSize); err != nil {
+		return err
+	}
+	hash := sha256.New()
+	hash.Write(first)
+	hash.Write(last)
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(size))
+	hash.Write(length[:])
+	fingerprint := hex.EncodeToString(hash.Sum(nil))
+	payload, _ := json.Marshal(map[string]any{"path": name, "size": size, "fingerprint": fingerprint})
+	response, err := r.request(ctx, http.MethodPost, "/api/v1/drive/uploads", nil, bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return err
+	}
+	var session struct {
+		ID     string `json:"id"`
+		Offset int64  `json:"offset"`
+	}
+	if err := readJSON(response, &session); err != nil {
+		return err
+	}
+	if session.ID == "" || session.Offset < 0 || session.Offset > size {
+		return errors.New("server returned an invalid upload session")
+	}
+	if _, err := file.Seek(session.Offset, io.SeekStart); err != nil {
+		return err
+	}
+	chunk := make([]byte, 4<<20)
+	for session.Offset < size {
+		count := int64(len(chunk))
+		if remaining := size - session.Offset; remaining < count {
+			count = remaining
+		}
+		if _, err := io.ReadFull(file, chunk[:count]); err != nil {
+			return err
+		}
+		digest := sha256.Sum256(chunk[:count])
+		request, err := http.NewRequestWithContext(ctx, http.MethodPatch, r.endpoint("/api/v1/drive/uploads/"+session.ID, nil), bytes.NewReader(chunk[:count]))
+		if err != nil {
+			return err
+		}
+		request.Header.Set("X-CSRF-Token", r.csrf)
+		request.Header.Set("X-Upload-Offset", strconv.FormatInt(session.Offset, 10))
+		request.Header.Set("X-Chunk-SHA256", hex.EncodeToString(digest[:]))
+		response, err := r.http.Do(request)
+		if err != nil {
+			return err
+		}
+		var progress struct {
+			Offset int64 `json:"offset"`
+		}
+		if err := readJSON(response, &progress); err != nil {
+			return err
+		}
+		if progress.Offset != session.Offset+count {
+			return errors.New("server returned an invalid upload offset")
+		}
+		session.Offset = progress.Offset
+	}
+	response, err = r.request(ctx, http.MethodPost, "/api/v1/drive/uploads/"+session.ID+"/complete", nil, nil, "")
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("complete upload %q: HTTP %d", name, response.StatusCode)
 	}
 	return nil
 }
