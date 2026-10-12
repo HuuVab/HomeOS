@@ -31,6 +31,12 @@ func (s *Store) SetLimits(maxFileBytes, quotaBytes int64) error {
 	return nil
 }
 
+func (s *Store) Limits() (maxFileBytes, quotaBytes int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxFileBytes, s.quotaBytes
+}
+
 func (s *Store) Usage() (StorageUsage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
