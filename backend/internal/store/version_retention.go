@@ -68,6 +68,7 @@ func (s *Store) ReferencedVersionChecksums(ownerID int64) (map[string]bool, erro
 	for _, query := range []string{
 		`SELECT checksum FROM file_versions WHERE owner_id = ? AND checksum IS NOT NULL`,
 		`SELECT checksum FROM file_entries WHERE owner_id = ? AND checksum IS NOT NULL`,
+		`SELECT checksum FROM trash_blobs WHERE owner_id = ? AND checksum IS NOT NULL`,
 	} {
 		rows, err := s.db.Query(s.query(query), ownerID)
 		if err != nil {
