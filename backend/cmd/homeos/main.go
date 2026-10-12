@@ -364,6 +364,22 @@ func main() {
 				log.Fatalf("read storage format for user %d: %v", ownerID, formatErr)
 			}
 			if format == "blobs" {
+				userFiles, fileErr := files.ForUser(ownerID)
+				if fileErr != nil {
+					log.Fatalf("open blob store for user %d: %v", ownerID, fileErr)
+				}
+				references, refErr := db.CatalogBlobReferences(ownerID)
+				if refErr != nil {
+					log.Fatalf("load committed blobs for user %d: %v", ownerID, refErr)
+				}
+				for checksum, size := range references {
+					blob, blobErr := userFiles.OpenBlob(checksum, size)
+					if blobErr != nil {
+						log.Fatalf("missing committed blob for user %d (%s): %v", ownerID, checksum, blobErr)
+					}
+					blob.Close()
+				}
+				log.Printf("Verified %d committed blob references for user %d", len(references), ownerID)
 				continue
 			}
 			userFiles, err := files.ForUser(ownerID)
