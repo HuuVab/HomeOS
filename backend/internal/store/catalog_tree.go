@@ -194,3 +194,118 @@ func (s *Store) CatalogDeleteForever(ownerID int64, id string) error {
 	}
 	return tx.Commit()
 }
+
+// CatalogTrashFiles returns the committed blob references required to restore
+// one Trash item. Callers verify each blob before committing a restore.
+func (s *Store) CatalogTrashFiles(ownerID int64, id string) ([]drive.Entry, error) {
+	if len(id) != 32 {
+		return nil, drive.ErrInvalidPath
+	}
+	if _, err := hex.DecodeString(id); err != nil {
+		return nil, drive.ErrInvalidPath
+	}
+	rows, err := s.db.Query(`SELECT path,kind,size,modified_at,version,COALESCE(checksum,'')
+		FROM trash_blobs WHERE owner_id=$1 AND trash_id=$2 ORDER BY length(path),path`, ownerID, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []drive.Entry
+	for rows.Next() {
+		var entry drive.Entry
+		var modified int64
+		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &modified, &entry.Version, &entry.Checksum); err != nil {
+			return nil, err
+		}
+		entry.ModifiedAt = time.Unix(modified, 0).UTC()
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, os.ErrNotExist
+	}
+	return entries, nil
+}
+
+func (s *Store) CatalogRestoreTrash(ownerID int64, id string) error {
+	if len(id) != 32 {
+		return drive.ErrInvalidPath
+	}
+	if _, err := hex.DecodeString(id); err != nil {
+		return drive.ErrInvalidPath
+	}
+	tx, err := s.catalogTx(ownerID)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var root string
+	if err := tx.QueryRow(`SELECT path FROM trash_entries WHERE owner_id=$1 AND id=$2`, ownerID, id).Scan(&root); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return os.ErrNotExist
+		}
+		return err
+	}
+	if err := s.catalogDestinationTx(tx, ownerID, root); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT path,kind,size,COALESCE(checksum,'') FROM trash_blobs
+		WHERE owner_id=$1 AND trash_id=$2 ORDER BY length(path),path`, ownerID, id)
+	if err != nil {
+		return err
+	}
+	var nodes []catalogNode
+	for rows.Next() {
+		var node catalogNode
+		if err := rows.Scan(&node.path, &node.kind, &node.size, &node.checksum); err != nil {
+			rows.Close()
+			return err
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if len(nodes) == 0 || nodes[0].path != root {
+		return errors.New("Trash manifest is incomplete")
+	}
+	now := time.Now().Unix()
+	for _, node := range nodes {
+		var exists int
+		err := tx.QueryRow(`SELECT 1 FROM file_entries WHERE owner_id=$1 AND path=$2`, ownerID, node.path).Scan(&exists)
+		if err == nil {
+			return os.ErrExist
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		version := int64(1)
+		if node.kind == "file" {
+			if err := tx.QueryRow(`SELECT COALESCE(MAX(version),0)+1 FROM file_versions WHERE owner_id=$1 AND path=$2`, ownerID, node.path).Scan(&version); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO file_entries(owner_id,path,kind,size,modified_at,version,checksum)
+			VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''))`, ownerID, node.path, node.kind, node.size, now, version, node.checksum); err != nil {
+			return err
+		}
+		if node.kind == "file" {
+			if _, err := tx.Exec(`INSERT INTO file_versions(owner_id,path,version,size,checksum,storage_path,created_at)
+				VALUES($1,$2,$3,$4,$5,$6,$7)`, ownerID, node.path, version, node.size, node.checksum, ".homeos-versions/"+node.checksum, now); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO change_events(owner_id,path,operation,version,occurred_at)
+			VALUES($1,$2,'create',$3,$4)`, ownerID, node.path, version, now); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM trash_entries WHERE owner_id=$1 AND id=$2`, ownerID, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
