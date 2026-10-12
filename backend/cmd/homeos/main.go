@@ -198,6 +198,49 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-blobs" {
+		if databaseURL == "" || len(os.Args) < 3 || len(os.Args) > 4 || (len(os.Args) == 4 && os.Args[3] != "--apply") {
+			log.Fatal("usage: set HOMEOS_DATABASE_URL, then homeos migrate-blobs <owner-id> [--apply]")
+		}
+		ownerID, parseErr := strconv.ParseInt(os.Args[2], 10, 64)
+		if parseErr != nil || ownerID < 1 {
+			log.Fatal("owner-id must be a positive integer")
+		}
+		bindAddress := os.Getenv("HOMEOS_BIND_ADDR")
+		if bindAddress == "" {
+			bindAddress = "127.0.0.1"
+		}
+		port := os.Getenv("HOMEOS_PORT")
+		if port == "" {
+			port = "8080"
+		}
+		connection, dialErr := net.DialTimeout("tcp", net.JoinHostPort(bindAddress, port), time.Second)
+		if dialErr == nil {
+			connection.Close()
+			log.Fatal("stop the HomeOS server before migrating blob storage")
+		}
+		files, err := drive.New(filepath.Join(dataDir, "files"))
+		if err != nil {
+			log.Fatal("open HomeDrive: ", err)
+		}
+		defer files.Close()
+		userFiles, err := files.ForUser(ownerID)
+		if err != nil {
+			log.Fatal("open owner files: ", err)
+		}
+		apply := len(os.Args) == 4
+		report, err := db.MigrateOwnerToBlobs(ownerID, userFiles, apply)
+		if err != nil {
+			log.Fatal("blob migration refused: ", err)
+		}
+		fmt.Printf("Owner %d: %d active entries, %d Trash entries, %d Trash nodes, %d verified blobs.\n", ownerID, report.ActiveEntries, report.TrashEntries, report.TrashNodes, report.VerifiedBlobs)
+		if apply {
+			fmt.Println("Blob catalog activated. Restart HomeOS and verify Drive operations before removing the legacy tree.")
+		} else {
+			fmt.Println("Dry run only. Back up PostgreSQL and HomeDrive files, then re-run with --apply.")
+		}
+		return
+	}
 
 	if len(os.Args) > 1 && (os.Args[1] == "create-admin" || os.Args[1] == "create-user" || os.Args[1] == "reset-admin-password") {
 		if len(os.Args) != 3 || !validUsername.MatchString(os.Args[2]) {
@@ -230,7 +273,7 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 {
-		log.Fatal("usage: homeos [create-admin <username> | create-user <username> | reset-admin-password <username> | backup <new-backup-path> | drive-import <owner-id> [--apply] | migrate-postgres [--apply]]")
+		log.Fatal("usage: homeos [create-admin <username> | create-user <username> | reset-admin-password <username> | backup <new-backup-path> | drive-import <owner-id> [--apply] | migrate-postgres [--apply] | migrate-blobs <owner-id> [--apply]]")
 	}
 	var accelerator *redisaccel.Layer
 	if redisURL := os.Getenv("HOMEOS_REDIS_URL"); redisURL != "" {
