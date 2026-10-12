@@ -62,6 +62,8 @@ For a fresh native Windows install, run `powershell -File .\scripts\setup-window
 
 Setup also ensures the PostgreSQL Windows service starts automatically and registers a `HomeOS PostgreSQL` scheduled task for the current Windows user. HomeOS starts at **user sign-in**, not before login. Re-running setup preserves a matching task and rejects an unrelated task of the same name. The task runs the compiled `backend/bin/homeos.exe`; run setup again after updating backend code to rebuild and restart that executable. The launcher waits up to one minute for PostgreSQL before starting HomeOS, and setup verifies HomeOS readiness before reporting success.
 
+Redis is optional and is not installed by the Windows setup. To enable it, provide a reachable `HOMEOS_REDIS_URL` (for example, `redis://127.0.0.1:6379/0`) in the HomeOS process environment. Startup rejects a configured but unreachable Redis server. Redis then supplies a shared login-attempt limit and caches owner-scoped folder listings for up to 10 seconds; successful file operations invalidate those listings. PostgreSQL remains the source of truth. If Redis fails while HomeOS is running, listing reads use PostgreSQL and login limiting falls back to an in-process limit. The current native Windows installation does not enable Redis.
+
 ## Verify
 
 ```powershell
