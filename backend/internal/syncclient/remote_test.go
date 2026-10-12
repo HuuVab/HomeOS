@@ -2,12 +2,72 @@ package syncclient
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestResumableUploadContinuesAtServerOffset(t *testing.T) {
+	contents := []byte(strings.Repeat("x", 5<<20))
+	filename := filepath.Join(t.TempDir(), "large.bin")
+	if err := os.WriteFile(filename, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	staged := append([]byte(nil), contents[:1<<20]...)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/drive/uploads":
+			if r.Header.Get("X-CSRF-Token") != "csrf" {
+				t.Error("missing CSRF token")
+			}
+			_, _ = w.Write([]byte(`{"id":"session","offset":1048576}`))
+		case "/api/v1/drive/uploads/session":
+			if r.Header.Get("X-Upload-Offset") != strconv.Itoa(len(staged)) {
+				t.Errorf("offset = %q", r.Header.Get("X-Upload-Offset"))
+			}
+			chunk, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			digest := sha256.Sum256(chunk)
+			if r.Header.Get("X-Chunk-SHA256") != hex.EncodeToString(digest[:]) {
+				t.Error("chunk digest mismatch")
+			}
+			staged = append(staged, chunk...)
+			_, _ = fmt.Fprintf(w, `{"offset":%d}`, len(staged))
+		case "/api/v1/drive/uploads/session/complete":
+			if string(staged) != string(contents) {
+				t.Error("completed bytes differ")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	remote, err := NewRemote(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote.csrf = "csrf"
+	file, err := os.Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := remote.UploadResumable(context.Background(), "large.bin", file, int64(len(contents))); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRemoteLoginListingAndChanges(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
