@@ -65,7 +65,17 @@ func newHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 				if err != nil {
 					return err
 				}
-				return db.ReconcileDriveMutation(user.ID, entries, trash, userFiles.PendingUploads())
+				if err := db.ReconcileDriveMutation(user.ID, entries, trash, userFiles.PendingUploads()); err != nil {
+					return err
+				}
+				if accelerator != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					if err := accelerator.InvalidateOwner(ctx, user.ID); err != nil {
+						log.Printf("HomeDrive Redis listing invalidation failed: %v", err)
+					}
+				}
+				return nil
 			}
 			return db.ReconcileFileMutation(user.ID, entries)
 		}
