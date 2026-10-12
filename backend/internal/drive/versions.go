@@ -38,24 +38,10 @@ func (s *Store) SnapshotFile(name string) (string, error) {
 	if err != nil || !before.Mode().IsRegular() {
 		return "", ErrInvalidPath
 	}
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return "", err
-	}
-	temp := path.Join(versionsDir, ".snapshot-"+hex.EncodeToString(random[:]))
-	target, err := s.root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	hash := sha256.New()
+	count, err := io.Copy(hash, source)
 	if err != nil {
 		return "", err
-	}
-	defer s.root.Remove(temp)
-	hash := sha256.New()
-	count, copyErr := io.Copy(io.MultiWriter(target, hash), source)
-	closeErr := target.Close()
-	if copyErr != nil {
-		return "", copyErr
-	}
-	if closeErr != nil {
-		return "", closeErr
 	}
 	after, err := s.root.Lstat(resolved)
 	if err != nil || !after.Mode().IsRegular() || before.Size() != count || after.Size() != count || !after.ModTime().Equal(before.ModTime()) {
@@ -70,6 +56,32 @@ func (s *Store) SnapshotFile(name string) (string, error) {
 		return checksum, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
+	}
+	if _, err := source.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	temp := path.Join(versionsDir, ".snapshot-"+hex.EncodeToString(random[:]))
+	target, err := s.root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return "", err
+	}
+	defer s.root.Remove(temp)
+	copyHash := sha256.New()
+	copied, copyErr := io.Copy(io.MultiWriter(target, copyHash), source)
+	closeErr := target.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	after, err = s.root.Lstat(resolved)
+	if err != nil || !after.Mode().IsRegular() || before.Size() != copied || after.Size() != copied || !after.ModTime().Equal(before.ModTime()) || copied != count || hex.EncodeToString(copyHash.Sum(nil)) != checksum {
+		return "", fmt.Errorf("file changed while snapshotting: %s", name)
 	}
 	if err := s.root.Rename(temp, blob); err != nil {
 		return "", err
