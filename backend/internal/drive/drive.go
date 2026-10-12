@@ -125,6 +125,20 @@ func validPart(part string) bool {
 	return true
 }
 
+// ValidCatalogPath checks a logical HomeDrive path without consulting the
+// legacy materialized filesystem tree.
+func ValidCatalogPath(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if !validPart(part) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Store) resolve(path string, allowRoot bool) (string, error) {
 	if path == "" && allowRoot {
 		return ".", nil
