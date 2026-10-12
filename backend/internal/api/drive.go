@@ -10,17 +10,32 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
+	"github.com/HuuVab/HomeOS/backend/internal/metadatapb"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64) {
+func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store, ownerID int64, metadataClient metadatapb.MetadataServiceClient) {
+	fileEntry := func(r *http.Request, name string) (drive.Entry, error) {
+		if metadataClient == nil {
+			return db.FileEntry(ownerID, name)
+		}
+		item, err := metadataClient.GetFile(r.Context(), &metadatapb.GetFileRequest{OwnerId: ownerID, Path: name})
+		if err != nil {
+			return drive.Entry{}, rpcFileError(err)
+		}
+		return drive.Entry{Name: item.Name, Path: item.Path, Kind: item.Kind, Size: item.Size,
+			ModifiedAt: time.Unix(item.ModifiedAtUnix, 0).UTC(), Version: item.Version}, nil
+	}
 	checkSource := func(w http.ResponseWriter, r *http.Request, name string) bool {
 		if !db.AuthoritativeMetadata() {
 			return true
 		}
-		entry, err := db.FileEntry(ownerID, name)
+		entry, err := fileEntry(r, name)
 		if err != nil {
 			driveError(w, err)
 			return false
@@ -36,11 +51,11 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		return true
 	}
-	checkTarget := func(w http.ResponseWriter, name string) bool {
+	checkTarget := func(w http.ResponseWriter, r *http.Request, name string) bool {
 		if !db.AuthoritativeMetadata() {
 			return true
 		}
-		if _, err := db.FileEntry(ownerID, name); err == nil {
+		if _, err := fileEntry(r, name); err == nil {
 			driveError(w, os.ErrExist)
 			return false
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -49,7 +64,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		parent := path.Dir(name)
 		if parent != "." {
-			entry, err := db.FileEntry(ownerID, parent)
+			entry, err := fileEntry(r, parent)
 			if err != nil {
 				driveError(w, err)
 				return false
@@ -79,7 +94,21 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		var entries []drive.Entry
 		var err error
 		if db.AuthoritativeMetadata() {
-			entries, err = db.FileEntries(ownerID, r.URL.Query().Get("path"))
+			if metadataClient != nil {
+				var result *metadatapb.ListFilesResponse
+				result, err = metadataClient.ListFiles(r.Context(), &metadatapb.ListFilesRequest{OwnerId: ownerID, Folder: r.URL.Query().Get("path")})
+				if err == nil {
+					entries = make([]drive.Entry, 0, len(result.Entries))
+					for _, item := range result.Entries {
+						entries = append(entries, drive.Entry{Name: item.Name, Path: item.Path, Kind: item.Kind, Size: item.Size,
+							ModifiedAt: time.Unix(item.ModifiedAtUnix, 0).UTC(), Version: item.Version})
+					}
+				} else {
+					err = rpcFileError(err)
+				}
+			} else {
+				entries, err = db.FileEntries(ownerID, r.URL.Query().Get("path"))
+			}
 		} else {
 			entries, err = files.List(r.URL.Query().Get("path"))
 		}
@@ -147,7 +176,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		name := r.URL.Query().Get("path")
 		if db.AuthoritativeMetadata() {
-			entry, err := db.FileEntry(ownerID, name)
+			entry, err := fileEntry(r, name)
 			if err != nil {
 				driveError(w, err)
 				return
@@ -187,7 +216,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected source and destination paths")
 			return
 		}
-		if !checkSource(w, r, payload.From) || !checkTarget(w, payload.To) {
+		if !checkSource(w, r, payload.From) || !checkTarget(w, r, payload.To) {
 			return
 		}
 		if err := files.Move(payload.From, payload.To); err != nil {
@@ -210,7 +239,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected source and destination paths")
 			return
 		}
-		if !checkSource(w, r, payload.From) || !checkTarget(w, payload.To) {
+		if !checkSource(w, r, payload.From) || !checkTarget(w, r, payload.To) {
 			return
 		}
 		if err := files.Copy(payload.From, payload.To); err != nil {
@@ -225,7 +254,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		folder := r.URL.Query().Get("path")
 		if db.AuthoritativeMetadata() {
-			entry, err := db.FileEntry(ownerID, folder)
+			entry, err := fileEntry(r, folder)
 			if err != nil {
 				driveError(w, err)
 				return
@@ -329,7 +358,15 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected a folder path")
 			return
 		}
-		if !checkTarget(w, payload.Path) {
+		if metadataClient != nil && db.AuthoritativeMetadata() {
+			if _, err := metadataClient.CreateFolder(r.Context(), &metadatapb.CreateFolderRequest{OwnerId: ownerID, Path: payload.Path}); err != nil {
+				driveError(w, rpcFileError(err))
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		if !checkTarget(w, r, payload.Path) {
 			return
 		}
 		if err := files.CreateFolder(payload.Path); err != nil {
@@ -343,7 +380,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			return
 		}
 		name := r.URL.Query().Get("path")
-		if !checkTarget(w, name) {
+		if !checkTarget(w, r, name) {
 			return
 		}
 		if err := files.Upload(name, r.Body); err != nil {
@@ -367,7 +404,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 			writeError(w, http.StatusBadRequest, "invalid_request", "Expected upload path, size, and fingerprint")
 			return
 		}
-		if !checkTarget(w, payload.Path) {
+		if !checkTarget(w, r, payload.Path) {
 			return
 		}
 		session, err := files.StartUpload(payload.Path, payload.Size, payload.Fingerprint)
@@ -433,7 +470,7 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 		}
 		name := r.URL.Query().Get("path")
 		if db.AuthoritativeMetadata() {
-			entry, err := db.FileEntry(ownerID, name)
+			entry, err := fileEntry(r, name)
 			if err != nil {
 				driveError(w, err)
 				return
@@ -460,6 +497,19 @@ func registerDriveRoutes(mux *http.ServeMux, db *store.Store, files *drive.Store
 	})
 }
 
+func rpcFileError(err error) error {
+	switch status.Code(err) {
+	case codes.NotFound:
+		return os.ErrNotExist
+	case codes.AlreadyExists:
+		return os.ErrExist
+	case codes.InvalidArgument:
+		return drive.ErrInvalidPath
+	default:
+		return err
+	}
+}
+
 func driveError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, drive.ErrInvalidPath):
@@ -476,6 +526,10 @@ func driveError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusRequestEntityTooLarge, "chunk_too_large", "Upload chunk exceeds the allowed size")
 	case errors.Is(err, drive.ErrQuotaExceeded):
 		writeError(w, http.StatusInsufficientStorage, "quota_exceeded", "Storage quota exceeded")
+	case status.Code(err) == codes.Aborted:
+		writeError(w, http.StatusConflict, "metadata_drift", "HomeDrive files differ from committed metadata")
+	case status.Code(err) == codes.Unavailable:
+		writeError(w, http.StatusServiceUnavailable, "metadata_unavailable", "HomeDrive metadata is unavailable")
 	case errors.Is(err, os.ErrPermission):
 		writeError(w, http.StatusForbidden, "forbidden", "Storage access denied")
 	default:

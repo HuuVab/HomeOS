@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/HuuVab/HomeOS/backend/internal/drive"
+	"github.com/HuuVab/HomeOS/backend/internal/metadatapb"
 	"github.com/HuuVab/HomeOS/backend/internal/monitor"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 )
@@ -28,7 +29,11 @@ type statusResponse struct {
 	Metrics   []metric  `json:"metrics"`
 }
 
-func NewHandler(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store) http.Handler {
+func NewHandler(webDir string, db *store.Store, collector monitor.Collector, files *drive.Store, metadataClients ...metadatapb.MetadataServiceClient) http.Handler {
+	var metadataClient metadatapb.MetadataServiceClient
+	if len(metadataClients) > 0 {
+		metadataClient = metadataClients[0]
+	}
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, db)
 	driveHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -72,9 +77,12 @@ func NewHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 			}
 		}
 		driveMux := http.NewServeMux()
-		registerDriveRoutes(driveMux, db, userFiles, user.ID)
+		registerDriveRoutes(driveMux, db, userFiles, user.ID, metadataClient)
 		metadataChanged := r.Method == http.MethodPut || r.Method == http.MethodDelete ||
 			(r.Method == http.MethodPost && r.URL.Path != "/api/v1/drive/uploads")
+		if metadataClient != nil && db.AuthoritativeMetadata() && r.Method == http.MethodPost && r.URL.Path == "/api/v1/drive/folders" {
+			metadataChanged = false // The internal RPC owns the mutation marker and reconciliation.
+		}
 		if !metadataChanged {
 			driveMux.ServeHTTP(w, r)
 			return
