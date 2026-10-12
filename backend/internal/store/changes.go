@@ -74,9 +74,15 @@ func (s *Store) reconcileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.En
 					if _, err := tx.Exec(s.query(`UPDATE file_entries SET checksum = ? WHERE owner_id = ? AND path = ?`), entry.Checksum, ownerID, entry.Path); err != nil {
 						return err
 					}
+					if err := s.insertVersionTx(tx, ownerID, entry, old.version, now); err != nil {
+						return err
+					}
 					continue
 				}
 			} else {
+				if err := s.insertVersionTx(tx, ownerID, entry, old.version, now); err != nil {
+					return err
+				}
 				continue
 			}
 		}
@@ -89,6 +95,9 @@ func (s *Store) reconcileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.En
 		if _, err := tx.Exec(s.query(`INSERT INTO file_entries (owner_id, path, kind, size, modified_at, version, checksum) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''))
 			ON CONFLICT (owner_id, path) DO UPDATE SET kind = EXCLUDED.kind, size = EXCLUDED.size, modified_at = EXCLUDED.modified_at, version = EXCLUDED.version, checksum = EXCLUDED.checksum`),
 			ownerID, entry.Path, entry.Kind, entry.Size, modifiedAt, version, entry.Checksum); err != nil {
+			return err
+		}
+		if err := s.insertVersionTx(tx, ownerID, entry, version, now); err != nil {
 			return err
 		}
 		if recordEvents {
@@ -108,4 +117,14 @@ func (s *Store) reconcileEntriesTx(tx *sql.Tx, ownerID int64, entries []drive.En
 		}
 	}
 	return nil
+}
+
+func (s *Store) insertVersionTx(tx *sql.Tx, ownerID int64, entry drive.Entry, version, now int64) error {
+	if entry.Kind != "file" || entry.Checksum == "" {
+		return nil
+	}
+	_, err := tx.Exec(s.query(`INSERT INTO file_versions (owner_id, path, version, size, checksum, storage_path, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (owner_id, path, version) DO NOTHING`),
+		ownerID, entry.Path, version, entry.Size, entry.Checksum, ".homeos-versions/"+entry.Checksum, now)
+	return err
 }
