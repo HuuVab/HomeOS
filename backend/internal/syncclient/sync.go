@@ -24,6 +24,8 @@ const maxPrototypeFileBytes = 32 << 20
 type Report struct {
 	Downloaded int
 	Uploaded   int
+	Updated    int
+	Deleted    int
 	Folders    int
 	Conflicts  int
 	Retried    int
@@ -143,8 +145,8 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 			}
 			continue
 		}
-		if known && exists && entry.Kind == "file" {
-			if err := state.MarkConflict(name, "remote version changed; local overwrite is not automatic"); err != nil {
+		if known && exists && entry.Kind == "file" && current.Hash != baseline.LocalHash {
+			if err := state.MarkConflict(name, "local bytes changed while the remote version changed"); err != nil {
 				return report, err
 			}
 			report.Conflicts++

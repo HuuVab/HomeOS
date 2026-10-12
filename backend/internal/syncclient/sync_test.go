@@ -135,10 +135,10 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 	entries["docs/remote.txt"] = RemoteEntry{Path: "docs/remote.txt", Kind: "file", Size: 17, Version: 2}
 	mu.Unlock()
 	report, err = Sync(context.Background(), root, state, remote)
-	if err != nil || report.Conflicts != 1 {
-		t.Fatalf("remote update conflict sync=%+v err=%v", report, err)
+	if err != nil || report.Downloaded != 1 || report.Conflicts != 0 {
+		t.Fatalf("remote update sync=%+v err=%v", report, err)
 	}
-	if data, err := os.ReadFile(remoteFile); err != nil || string(data) != "remote" {
-		t.Fatalf("local file changed without approval: %q err=%v", data, err)
+	if data, err := os.ReadFile(remoteFile); err != nil || string(data) != "changed on server" {
+		t.Fatalf("unchanged local file did not receive remote update: %q err=%v", data, err)
 	}
 }
