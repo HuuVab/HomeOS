@@ -588,6 +588,8 @@ func driveError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "not_found", "File or folder not found")
 	case errors.Is(err, os.ErrExist):
 		writeError(w, http.StatusConflict, "already_exists", "File or folder already exists")
+	case errors.Is(err, store.ErrCatalogRevision):
+		writeError(w, http.StatusPreconditionFailed, "version_conflict", "The item changed; refresh the file list before retrying")
 	case errors.Is(err, drive.ErrOffset):
 		writeError(w, http.StatusConflict, "offset_mismatch", "Upload offset does not match the stored file")
 	case errors.Is(err, drive.ErrChecksum):
