@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 type Entry = { name: string; path: string; kind: 'file' | 'folder'; size: number; modifiedAt: string; version?: number }
 type TrashEntry = { id: string; path: string; deletedAt: string }
 type StorageUsage = { usedBytes: number; reservedBytes: number; quotaBytes: number; maxFileBytes: number }
+type FileVersion = { version: number; size: number; checksum: string; createdAt: number }
 type Props = { csrfToken: string }
 type SortKey = 'name' | 'date' | 'size' | 'type'
 type Action = 'rename' | 'move' | 'copy' | 'trash'
@@ -83,6 +84,8 @@ export default function Drive({ csrfToken }: Props) {
   const [dragActive, setDragActive] = useState(false)
   const [inspected, setInspected] = useState<Entry | null>(null)
   const [previewText, setPreviewText] = useState<string | null>(null)
+  const [versions, setVersions] = useState<FileVersion[] | null>(null)
+  const [versionError, setVersionError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -144,6 +147,18 @@ export default function Drive({ csrfToken }: Props) {
       .then(async (response) => { if (!response.ok) throw await responseError(response); return response.text() })
       .then((content) => { if (!controller.signal.aborted) setPreviewText(content) })
       .catch((cause) => { if (!controller.signal.aborted) setPreviewText(cause instanceof Error ? cause.message : 'Preview unavailable') })
+    return () => controller.abort()
+  }, [inspected])
+
+  useEffect(() => {
+    setVersions(null)
+    setVersionError(null)
+    if (!inspected || inspected.kind !== 'file') return
+    const controller = new AbortController()
+    void fetch(`/api/v1/drive/versions?path=${encodeURIComponent(inspected.path)}`, { cache: 'no-store', signal: controller.signal })
+      .then(async (response) => { if (!response.ok) throw await responseError(response); return response.json() as Promise<{ versions: FileVersion[] }> })
+      .then((data) => { if (!controller.signal.aborted) setVersions(data.versions) })
+      .catch((cause) => { if (!controller.signal.aborted) setVersionError(cause instanceof Error ? cause.message : 'Version history unavailable') })
     return () => controller.abort()
   }, [inspected])
 
@@ -222,6 +237,18 @@ export default function Drive({ csrfToken }: Props) {
     finally { setBusy(false) }
   }
 
+  async function restoreVersion(entry: Entry, version: FileVersion) {
+    if (!window.confirm(`Restore version ${version.version} of ${entry.name}? The current file will be saved as a version.`)) return
+    setBusy(true)
+    try {
+      await mutate('/api/v1/drive/versions/restore', { path: entry.path, version: version.version }, entry.version)
+      setInspected(null)
+      await refresh()
+      setError(null)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not restore version') }
+    finally { setBusy(false) }
+  }
+
   async function uploadFiles() {
     if (uploads.length === 0) return
     setBusy(true); setError(null)
@@ -295,6 +322,6 @@ export default function Drive({ csrfToken }: Props) {
       {loading || searching ? <p className="drive-empty">{searching ? 'Searching…' : 'Loading files…'}</p> : visible.length === 0 ? <p className="drive-empty">{query ? 'No matching files or folders.' : 'This folder is empty. Create a folder or drop files here.'}</p> : view === 'list' ? <div className="drive-table"><div className="drive-table-head"><input type="checkbox" aria-label="Select all visible items" checked={visible.length > 0 && visible.every((entry) => selected.has(entry.path))} onChange={() => setSelected(visible.every((entry) => selected.has(entry.path)) ? new Set() : new Set(visible.map((entry) => entry.path)))} /><span>Name</span><span>Size</span><span>Modified</span><span className="sr-only">Actions</span></div><ul className="drive-table-body">{visible.map((entry) => <li className={`drive-data-row ${selected.has(entry.path) ? 'selected' : ''}`} key={entry.path}><input type="checkbox" aria-label={`Select ${entry.name}`} checked={selected.has(entry.path)} onChange={() => toggleSelected(entry.path)} /><button type="button" className="drive-name-button" onClick={() => openEntry(entry)}><EntryIcon entry={entry} /><span title={entry.path}>{entry.name}</span></button><span className="drive-muted">{entry.kind === 'folder' ? '—' : bytes(entry.size)}</span><span className="drive-muted">{modified(entry.modifiedAt)}</span><div className="drive-row-menu"><button type="button" className="drive-icon-button" aria-label={`Actions for ${entry.name}`} onClick={() => setOpenMenu(openMenu === entry.path ? null : entry.path)}>⋯</button>{openMenu === entry.path && <div className="drive-popover drive-action-menu"><button type="button" onClick={() => { setInspected(entry); setOpenMenu(null) }}>Details{previewable.test(entry.name) ? ' / Preview' : ''}</button><button type="button" disabled={busy} onClick={() => void changeEntry(entry, 'rename')}>Rename</button><button type="button" disabled={busy} onClick={() => void changeEntry(entry, 'move')}>Move</button><button type="button" disabled={busy} onClick={() => void changeEntry(entry, 'copy')}>Copy</button><a href={entry.kind === 'folder' ? `/api/v1/drive/folders/zip?path=${encodeURIComponent(entry.path)}` : `/api/v1/drive/files?path=${encodeURIComponent(entry.path)}`}>{entry.kind === 'folder' ? 'Download ZIP' : 'Download'}</a><button type="button" disabled={busy} onClick={() => void changeEntry(entry, 'trash')}>Move to Trash</button></div>}</div></li>)}</ul></div> : <ul className="drive-grid">{visible.map((entry) => <li className={selected.has(entry.path) ? 'selected' : ''} key={entry.path}><input type="checkbox" aria-label={`Select ${entry.name}`} checked={selected.has(entry.path)} onChange={() => toggleSelected(entry.path)} /><button type="button" className="drive-grid-open" onClick={() => openEntry(entry)}><EntryIcon entry={entry} /><strong title={entry.path}>{entry.name}</strong><small>{entry.kind === 'folder' ? 'Folder' : bytes(entry.size)} · {modified(entry.modifiedAt)}</small></button><button type="button" className="drive-icon-button" aria-label={`Details for ${entry.name}`} onClick={() => setInspected(entry)}>ⓘ</button></li>)}</ul>}
       <div className="drive-footer"><span>{fileCount} files · {folderCount} folders</span><span>{bytes(visible.filter((entry) => entry.kind === 'file').reduce((sum, entry) => sum + entry.size, 0))}</span></div>
     </div>}
-    {inspected && <div className="drive-inspector-backdrop" onClick={() => setInspected(null)}><aside className="drive-inspector" onClick={(event) => event.stopPropagation()} aria-label="File details"><div className="drive-inspector-head"><h2>{inspected.name}</h2><button type="button" className="drive-icon-button" aria-label="Close details" onClick={() => setInspected(null)}>×</button></div><div className="drive-inspector-preview">{imageFile.test(inspected.name) ? <img src={previewURL} alt={inspected.name} /> : /\.pdf$/i.test(inspected.name) ? <iframe title={`Preview ${inspected.name}`} src={previewURL} /> : textFile.test(inspected.name) ? <pre>{previewText ?? 'Loading preview…'}</pre> : <EntryIcon entry={inspected} />}</div><dl><dt>Location</dt><dd>/{inspected.path}</dd><dt>Type</dt><dd>{fileType(inspected)}</dd><dt>Size</dt><dd>{inspected.kind === 'folder' ? 'Folder' : bytes(inspected.size)}</dd><dt>Modified</dt><dd>{new Date(inspected.modifiedAt).toLocaleString()}</dd></dl>{inspected.kind === 'file' && <a className="drive-download" href={`/api/v1/drive/files?path=${encodeURIComponent(inspected.path)}`}>Download</a>}</aside></div>}
+    {inspected && <div className="drive-inspector-backdrop" onClick={() => setInspected(null)}><aside className="drive-inspector" onClick={(event) => event.stopPropagation()} aria-label="File details"><div className="drive-inspector-head"><h2>{inspected.name}</h2><button type="button" className="drive-icon-button" aria-label="Close details" onClick={() => setInspected(null)}>×</button></div><div className="drive-inspector-preview">{imageFile.test(inspected.name) ? <img src={previewURL} alt={inspected.name} /> : /\.pdf$/i.test(inspected.name) ? <iframe title={`Preview ${inspected.name}`} src={previewURL} /> : textFile.test(inspected.name) ? <pre>{previewText ?? 'Loading preview…'}</pre> : <EntryIcon entry={inspected} />}</div><dl><dt>Location</dt><dd>/{inspected.path}</dd><dt>Type</dt><dd>{fileType(inspected)}</dd><dt>Size</dt><dd>{inspected.kind === 'folder' ? 'Folder' : bytes(inspected.size)}</dd><dt>Modified</dt><dd>{new Date(inspected.modifiedAt).toLocaleString()}</dd></dl>{inspected.kind === 'file' && <><a className="drive-download" href={`/api/v1/drive/files?path=${encodeURIComponent(inspected.path)}`}>Download</a><section className="drive-versions" aria-label="Version history"><h3>Version history</h3>{versionError ? <p role="alert">{versionError}</p> : versions === null ? <p>Loading versions…</p> : versions.length === 0 ? <p>No saved versions yet.</p> : <ul>{versions.map((version) => <li key={version.version}><span><strong>Version {version.version}{version.version === inspected.version ? ' · Current' : ''}</strong><small>{bytes(version.size)} · {new Date(version.createdAt * 1000).toLocaleString()}</small></span><button type="button" disabled={busy || version.version === inspected.version} onClick={() => void restoreVersion(inspected, version)}>Restore</button></li>)}</ul>}</section></>}</aside></div>}
   </section>
 }
