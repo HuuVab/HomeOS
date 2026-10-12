@@ -28,11 +28,13 @@ type Store struct {
 	db         *sql.DB
 	path       string
 	dialect    string
-	mutationMu sync.Mutex
+	mutationMu sync.RWMutex
 }
 
 func (s *Store) LockDriveMutations()   { s.mutationMu.Lock() }
 func (s *Store) UnlockDriveMutations() { s.mutationMu.Unlock() }
+func (s *Store) LockDriveReads()       { s.mutationMu.RLock() }
+func (s *Store) UnlockDriveReads()     { s.mutationMu.RUnlock() }
 
 type User struct {
 	ID           int64  `json:"id"`
