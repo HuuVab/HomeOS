@@ -174,4 +174,13 @@ if ($restartTask) {
 } elseif (-not (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue)) {
     Start-ScheduledTask -TaskName $taskName
 }
+$ready = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    try {
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/v1/health/ready' -TimeoutSec 2
+        if ($health.status -eq 'ready') { $ready = $true; break }
+    } catch { }
+    Start-Sleep -Seconds 2
+}
+if (-not $ready) { throw 'HomeOS did not become ready on 127.0.0.1:8080.' }
 Write-Host 'HomeOS PostgreSQL setup is ready. PostgreSQL starts with Windows; HomeOS starts when this user signs in.'
