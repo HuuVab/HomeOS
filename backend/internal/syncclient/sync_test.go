@@ -53,7 +53,7 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 				return
 			}
 			if old, exists := entries[name]; exists {
-				if r.Header.Get("X-Source-Version") != "1" && r.Header.Get("X-Source-Version") != "2" {
+				if r.Header.Get("X-Source-Version") != strconv.FormatInt(old.Version, 10) {
 					w.WriteHeader(http.StatusPreconditionFailed)
 					return
 				}
@@ -216,5 +216,48 @@ func TestSyncPullsUploadsAndPreservesEditConflict(t *testing.T) {
 		return nil
 	}); err != nil || !recovered {
 		t.Fatalf("recovery copy missing: recovered=%t err=%v", recovered, err)
+	}
+	mu.Lock()
+	entries["docs/conflict.txt"] = RemoteEntry{Path: "docs/conflict.txt", Kind: "file", Size: 6, Version: 1}
+	contents["docs/conflict.txt"] = "server"
+	mu.Unlock()
+	if _, err := Sync(context.Background(), root, state, remote); err != nil {
+		t.Fatal(err)
+	}
+	conflictFile := filepath.Join(root, "docs", "conflict.txt")
+	if err := os.WriteFile(conflictFile, []byte("local"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	entries["docs/conflict.txt"] = RemoteEntry{Path: "docs/conflict.txt", Kind: "file", Size: 7, Version: 2}
+	contents["docs/conflict.txt"] = "remote2"
+	mu.Unlock()
+	if report, err := Sync(context.Background(), root, state, remote); err != nil || report.Conflicts != 1 {
+		t.Fatalf("conflict before resolution=%+v err=%v", report, err)
+	}
+	if err := ResolveFileConflict(context.Background(), root, state, remote, "docs/conflict.txt", "keep-remote"); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(conflictFile); err != nil || string(data) != "remote2" {
+		t.Fatalf("keep-remote result=%q err=%v", data, err)
+	}
+	if err := os.WriteFile(conflictFile, []byte("mine"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	entries["docs/conflict.txt"] = RemoteEntry{Path: "docs/conflict.txt", Kind: "file", Size: 7, Version: 3}
+	contents["docs/conflict.txt"] = "server3"
+	mu.Unlock()
+	if report, err := Sync(context.Background(), root, state, remote); err != nil || report.Conflicts != 1 {
+		t.Fatalf("second conflict=%+v err=%v", report, err)
+	}
+	if err := ResolveFileConflict(context.Background(), root, state, remote, "docs/conflict.txt", "keep-local"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	resolved := contents["docs/conflict.txt"]
+	mu.Unlock()
+	if resolved != "mine" {
+		t.Fatalf("keep-local result=%q", resolved)
 	}
 }
