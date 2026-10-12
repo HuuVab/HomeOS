@@ -188,7 +188,7 @@ func Sync(ctx context.Context, directory string, state *State, remote *Remote) (
 			if err == nil {
 				err = remote.UploadNew(ctx, name, file)
 				closeErr := file.Close()
-				if err == nil {
+				if err == nil && !errors.Is(closeErr, os.ErrClosed) {
 					err = closeErr
 				}
 			}
