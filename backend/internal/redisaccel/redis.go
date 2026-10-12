@@ -44,7 +44,7 @@ func Open(ctx context.Context, rawURL string) (*Layer, error) {
 
 func (l *Layer) Close() error { return l.client.Close() }
 
-// AllowLogin atomically limits each remote IP to 10 attempts per rolling minute.
+// AllowLogin atomically limits each remote IP to 10 attempts per 60-second window.
 func (l *Layer) AllowLogin(ctx context.Context, remote string) (bool, error) {
 	host, _, err := net.SplitHostPort(remote)
 	if err != nil {
