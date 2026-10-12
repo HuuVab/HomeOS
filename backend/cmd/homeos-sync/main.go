@@ -100,8 +100,8 @@ func run(arguments []string) error {
 		report, syncErr := syncclient.Sync(syncCtx, absolute, state, remote)
 		cancel()
 		if syncErr == nil {
-			fmt.Printf("Sync complete: %d downloaded, %d uploaded, %d folders, %d conflicts, %d queued for retry; change cursor %d.\n",
-				report.Downloaded, report.Uploaded, report.Folders, report.Conflicts, report.Retried, report.Cursor)
+			fmt.Printf("Sync complete: %d downloaded, %d uploaded, %d updated, %d moved to remote Trash, %d locally archived, %d folders, %d conflicts, %d queued for retry; change cursor %d.\n",
+				report.Downloaded, report.Uploaded, report.Updated, report.Deleted, report.RemovedLocal, report.Folders, report.Conflicts, report.Retried, report.Cursor)
 			if err := printStatus(state); err != nil {
 				return err
 			}
