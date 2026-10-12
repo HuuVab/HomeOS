@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"github.com/HuuVab/HomeOS/backend/internal/metadata"
 	"github.com/HuuVab/HomeOS/backend/internal/metadatapb"
 	"github.com/HuuVab/HomeOS/backend/internal/monitor"
+	"github.com/HuuVab/HomeOS/backend/internal/redisaccel"
 	"github.com/HuuVab/HomeOS/backend/internal/store"
 	"golang.org/x/term"
 )
@@ -195,6 +197,17 @@ func main() {
 	if len(os.Args) > 1 {
 		log.Fatal("usage: homeos [create-admin <username> | create-user <username> | reset-admin-password <username> | backup <new-backup-path> | drive-import <owner-id> [--apply] | migrate-postgres [--apply]]")
 	}
+	var accelerator *redisaccel.Layer
+	if redisURL := os.Getenv("HOMEOS_REDIS_URL"); redisURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		accelerator, err = redisaccel.Open(ctx, redisURL)
+		cancel()
+		if err != nil {
+			log.Fatal("configure Redis acceleration: ", err)
+		}
+		defer accelerator.Close()
+		log.Print("Redis acceleration enabled")
+	}
 
 	bindAddress := os.Getenv("HOMEOS_BIND_ADDR")
 	if bindAddress == "" {
@@ -320,6 +333,13 @@ func main() {
 			if err == nil {
 				err = db.ReconcileDriveMutation(ownerID, entries, trash, userFiles.PendingUploads())
 			}
+			if err == nil && accelerator != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				if cacheErr := accelerator.InvalidateOwner(ctx, ownerID); cacheErr != nil {
+					log.Printf("HomeDrive Redis listing invalidation failed: %v", cacheErr)
+				}
+				cancel()
+			}
 			if err != nil {
 				log.Printf("HomeDrive Trash cleanup for user %d: %v", ownerID, err)
 			}
@@ -337,7 +357,7 @@ func main() {
 	var metadataClient metadatapb.MetadataServiceClient
 	if db.AuthoritativeMetadata() {
 		var closeMetadata func()
-		metadataClient, closeMetadata, err = metadata.NewInProcessClient(db, files)
+		metadataClient, closeMetadata, err = metadata.NewInProcessClient(db, files, accelerator)
 		if err != nil {
 			log.Fatal("start metadata gRPC service: ", err)
 		}
@@ -345,7 +365,7 @@ func main() {
 	}
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           api.NewHandler(os.Getenv("HOMEOS_WEB_DIR"), db, monitor.NewCollector(dataDir), files, metadataClient),
+		Handler:           api.NewHandlerWithRedis(os.Getenv("HOMEOS_WEB_DIR"), db, monitor.NewCollector(dataDir), files, accelerator, metadataClient),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("HomeOS listening on http://%s", addr)
