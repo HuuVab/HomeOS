@@ -55,7 +55,10 @@ func NewRemote(rawURL string) (*Remote, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Remote{base: parsed, http: &http.Client{Jar: jar, Timeout: 10 * time.Minute}}, nil
+	return &Remote{base: parsed, http: &http.Client{
+		Jar: jar, Timeout: 10 * time.Minute,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}}, nil
 }
 
 func (r *Remote) Origin() string { return r.base.String() }
