@@ -17,6 +17,35 @@ type catalogNode struct {
 	size, modifiedAt, version int64
 }
 
+func (s *Store) CatalogSubtree(ownerID int64, root string) ([]drive.Entry, error) {
+	if !drive.ValidCatalogPath(root) {
+		return nil, drive.ErrInvalidPath
+	}
+	rows, err := s.db.Query(`SELECT path,kind,size,modified_at,version,COALESCE(checksum,'') FROM file_entries
+		WHERE owner_id=$1 AND (path=$2 OR left(path,length($2)+1)=$2||'/') ORDER BY length(path),path`, ownerID, root)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []drive.Entry
+	for rows.Next() {
+		var entry drive.Entry
+		var modified int64
+		if err := rows.Scan(&entry.Path, &entry.Kind, &entry.Size, &modified, &entry.Version, &entry.Checksum); err != nil {
+			return nil, err
+		}
+		entry.ModifiedAt = time.Unix(modified, 0).UTC()
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, os.ErrNotExist
+	}
+	return entries, nil
+}
+
 func (s *Store) catalogSubtreeTx(tx *sql.Tx, ownerID int64, root string) ([]catalogNode, error) {
 	rows, err := tx.Query(`SELECT path,kind,size,modified_at,version,COALESCE(checksum,'') FROM file_entries
 		WHERE owner_id=$1 AND (path=$2 OR left(path,length($2)+1)=$2||'/') ORDER BY length(path),path`, ownerID, root)
