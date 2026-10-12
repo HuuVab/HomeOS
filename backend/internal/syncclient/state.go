@@ -1,0 +1,192 @@
+package syncclient
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+const stateDir = ".homeos-sync"
+
+type State struct {
+	db *sql.DB
+}
+
+type Baseline struct {
+	Path          string
+	Kind          string
+	RemoteVersion int64
+	LocalHash     string
+}
+
+type Pending struct {
+	Path        string
+	Operation   string
+	BaseVersion int64
+	LocalHash   string
+	Attempts    int
+	NextAttempt int64
+	LastError   string
+}
+
+type Conflict struct {
+	Path   string
+	Reason string
+}
+
+func OpenState(root string) (*State, error) {
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(absolute)
+	if err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("sync root must be an existing directory: %s", absolute)
+	}
+	directory := filepath.Join(absolute, stateDir)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", filepath.Join(directory, "state.sqlite"))
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	for _, statement := range []string{
+		`PRAGMA busy_timeout = 5000`,
+		`PRAGMA journal_mode = WAL`,
+		`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, kind TEXT NOT NULL, remote_version INTEGER NOT NULL, local_hash TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS pending (path TEXT PRIMARY KEY, operation TEXT NOT NULL, base_version INTEGER NOT NULL, local_hash TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS conflicts (path TEXT PRIMARY KEY, reason TEXT NOT NULL, detected_at INTEGER NOT NULL)`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
+	return &State{db: db}, nil
+}
+
+func (s *State) Close() error { return s.db.Close() }
+
+func (s *State) Baselines() (map[string]Baseline, error) {
+	rows, err := s.db.Query(`SELECT path, kind, remote_version, local_hash FROM files`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]Baseline)
+	for rows.Next() {
+		var item Baseline
+		if err := rows.Scan(&item.Path, &item.Kind, &item.RemoteVersion, &item.LocalHash); err != nil {
+			return nil, err
+		}
+		result[item.Path] = item
+	}
+	return result, rows.Err()
+}
+
+func (s *State) SaveBaseline(item Baseline) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO files(path,kind,remote_version,local_hash) VALUES(?,?,?,?)
+		ON CONFLICT(path) DO UPDATE SET kind=excluded.kind, remote_version=excluded.remote_version, local_hash=excluded.local_hash`,
+		item.Path, item.Kind, item.RemoteVersion, item.LocalHash); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM pending WHERE path=?`, item.Path); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM conflicts WHERE path=?`, item.Path); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *State) Queue(item Pending) error {
+	if item.Path == "" || (item.Operation != "create" && item.Operation != "update" && item.Operation != "delete") {
+		return errors.New("invalid pending operation")
+	}
+	_, err := s.db.Exec(`INSERT INTO pending(path,operation,base_version,local_hash) VALUES(?,?,?,?)
+		ON CONFLICT(path) DO UPDATE SET operation=excluded.operation, base_version=excluded.base_version,
+		local_hash=excluded.local_hash, attempts=CASE WHEN pending.local_hash=excluded.local_hash AND pending.operation=excluded.operation THEN pending.attempts ELSE 0 END,
+		next_attempt=CASE WHEN pending.local_hash=excluded.local_hash AND pending.operation=excluded.operation THEN pending.next_attempt ELSE 0 END,
+		last_error=CASE WHEN pending.local_hash=excluded.local_hash AND pending.operation=excluded.operation THEN pending.last_error ELSE '' END`,
+		item.Path, item.Operation, item.BaseVersion, item.LocalHash)
+	return err
+}
+
+func (s *State) Pending() ([]Pending, error) {
+	rows, err := s.db.Query(`SELECT path,operation,base_version,local_hash,attempts,next_attempt,last_error FROM pending ORDER BY path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Pending
+	for rows.Next() {
+		var item Pending
+		if err := rows.Scan(&item.Path, &item.Operation, &item.BaseVersion, &item.LocalHash, &item.Attempts, &item.NextAttempt, &item.LastError); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *State) ClearPending(path string) error {
+	_, err := s.db.Exec(`DELETE FROM pending WHERE path=?`, path)
+	return err
+}
+
+func (s *State) Retry(path string, failure error) error {
+	_, err := s.db.Exec(`UPDATE pending SET attempts=attempts+1,
+		next_attempt=? + MIN(3600, 1 << MIN(attempts, 11)), last_error=? WHERE path=?`,
+		time.Now().Unix(), failure.Error(), path)
+	return err
+}
+
+func (s *State) MarkConflict(path, reason string) error {
+	_, err := s.db.Exec(`INSERT INTO conflicts(path,reason,detected_at) VALUES(?,?,?)
+		ON CONFLICT(path) DO UPDATE SET reason=excluded.reason, detected_at=excluded.detected_at`, path, reason, time.Now().Unix())
+	return err
+}
+
+func (s *State) Conflicts() ([]Conflict, error) {
+	rows, err := s.db.Query(`SELECT path,reason FROM conflicts ORDER BY path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Conflict
+	for rows.Next() {
+		var item Conflict
+		if err := rows.Scan(&item.Path, &item.Reason); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *State) Meta(key string) (string, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return value, err
+}
+
+func (s *State) SetMeta(key, value string) error {
+	_, err := s.db.Exec(`INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
+}
