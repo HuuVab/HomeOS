@@ -8,7 +8,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -33,6 +35,12 @@ func ScanLocal(root string, state *State) (map[string]LocalEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	lastFull, err := state.Meta("last_full_hash")
+	if err != nil {
+		return nil, err
+	}
+	lastFullUnix, parseErr := strconv.ParseInt(lastFull, 10, 64)
+	fullAudit := parseErr != nil || time.Since(time.Unix(lastFullUnix, 0)) >= 24*time.Hour
 	nextCache := make(map[string]ScanCacheEntry)
 	local := make(map[string]LocalEntry)
 	err = filepath.WalkDir(absolute, func(filename string, entry fs.DirEntry, walkErr error) error {
@@ -68,7 +76,7 @@ func ScanLocal(root string, state *State) (map[string]LocalEntry, error) {
 				return fmt.Errorf("sync refuses non-regular file: %s", relative)
 			}
 			cached, known := cache[name]
-			if known && cached.Size == info.Size() && cached.ModifiedNS == info.ModTime().UnixNano() {
+			if !fullAudit && known && cached.Size == info.Size() && cached.ModifiedNS == info.ModTime().UnixNano() {
 				item.Hash = cached.Hash
 			} else {
 				file, err := os.Open(filename)
@@ -98,6 +106,11 @@ func ScanLocal(root string, state *State) (map[string]LocalEntry, error) {
 	}
 	if err := state.SaveScanCache(nextCache); err != nil {
 		return nil, err
+	}
+	if fullAudit {
+		if err := state.SetMeta("last_full_hash", strconv.FormatInt(time.Now().Unix(), 10)); err != nil {
+			return nil, err
+		}
 	}
 	for name, item := range local {
 		baseline, known := baselines[name]

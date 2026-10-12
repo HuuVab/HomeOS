@@ -108,3 +108,37 @@ func TestScanCacheTracksMetadataAndPrunesDeletes(t *testing.T) {
 		t.Fatalf("stale cache %+v: %v", cache, err)
 	}
 }
+
+func TestPeriodicAuditDetectsPreservedSizeAndTimestamp(t *testing.T) {
+	root := t.TempDir()
+	state, err := OpenState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	name := filepath.Join(root, "quiet.txt")
+	if err := os.WriteFile(name, []byte("first"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	first, err := ScanLocal(root, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(name, []byte("other"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(name, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetMeta("last_full_hash", "0"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := ScanLocal(root, state)
+	if err != nil || second["quiet.txt"].Hash == first["quiet.txt"].Hash {
+		t.Fatalf("audit missed quiet edit %+v: %v", second, err)
+	}
+}
