@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,10 +24,10 @@ func main() {
 
 func run(arguments []string) error {
 	if len(arguments) < 2 {
-		return errors.New("usage: homeos-sync <init|scan|status|sync> <existing-local-folder> [--server URL] [--user USERNAME]")
+		return errors.New("usage: homeos-sync <init|scan|status|sync|watch> <existing-local-folder> [--server URL] [--user USERNAME]")
 	}
 	command, directory := arguments[0], arguments[1]
-	if command != "init" && command != "scan" && command != "status" && command != "sync" {
+	if command != "init" && command != "scan" && command != "status" && command != "sync" && command != "watch" {
 		return fmt.Errorf("unknown command %q", command)
 	}
 	absolute, err := filepath.Abs(directory)
@@ -36,11 +37,15 @@ func run(arguments []string) error {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	serverURL := flags.String("server", "http://127.0.0.1:8080", "HomeOS server origin")
 	username := flags.String("user", "", "HomeOS username")
+	interval := flags.Duration("interval", 30*time.Second, "polling interval for watch mode")
 	if err := flags.Parse(arguments[2:]); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("unexpected extra arguments")
+	}
+	if command == "watch" && *interval < 5*time.Second {
+		return errors.New("watch interval must be at least 5 seconds")
 	}
 	state, err := syncclient.OpenState(absolute)
 	if err != nil {
@@ -82,18 +87,38 @@ func run(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	if err := remote.Login(ctx, *username, string(password)); err != nil {
+	loginCtx, cancelLogin := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelLogin()
+	if err := remote.Login(loginCtx, *username, string(password)); err != nil {
 		return err
 	}
-	report, err := syncclient.Sync(ctx, absolute, state, remote)
-	if err != nil {
-		return err
+	clear(password)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	for {
+		syncCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		report, syncErr := syncclient.Sync(syncCtx, absolute, state, remote)
+		cancel()
+		if syncErr == nil {
+			fmt.Printf("Sync complete: %d downloaded, %d uploaded, %d folders, %d conflicts, %d queued for retry; change cursor %d.\n",
+				report.Downloaded, report.Uploaded, report.Folders, report.Conflicts, report.Retried, report.Cursor)
+			if err := printStatus(state); err != nil {
+				return err
+			}
+		} else if command != "watch" || strings.Contains(syncErr.Error(), "HTTP 401") {
+			return syncErr
+		} else {
+			fmt.Fprintln(os.Stderr, "homeos-sync: retrying after:", syncErr)
+		}
+		if command != "watch" || ctx.Err() != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(*interval):
+		}
 	}
-	fmt.Printf("Sync complete: %d downloaded, %d uploaded, %d folders, %d conflicts, %d queued for retry; change cursor %d.\n",
-		report.Downloaded, report.Uploaded, report.Folders, report.Conflicts, report.Retried, report.Cursor)
-	return printStatus(state)
 }
 
 func clear(data []byte) {
