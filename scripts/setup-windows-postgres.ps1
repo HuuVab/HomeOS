@@ -156,33 +156,33 @@ if ($existing) {
 }
 if ($restartTask) {
     Stop-ScheduledTask -TaskName $taskName
-    $listener = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    $listener = Get-NetTCPConnection -LocalPort 8091 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($listener) {
         $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)"
         $expectedBinary = Join-Path $backend 'bin\homeos.exe'
         if (-not $process -or -not [string]::Equals($process.ExecutablePath, $expectedBinary, [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Port 8080 belongs to an unexpected process; refusing to stop it.'
+            throw 'Port 8091 belongs to an unexpected process; refusing to stop it.'
         }
         Stop-Process -Id $listener.OwningProcess -Force
     }
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
-        if (-not (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue)) { break }
+        if (-not (Get-NetTCPConnection -LocalPort 8091 -State Listen -ErrorAction SilentlyContinue)) { break }
         Start-Sleep -Milliseconds 500
     }
-    if (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue) {
-        throw 'The previous HomeOS instance did not release port 8080; refusing to launch a duplicate.'
+    if (Get-NetTCPConnection -LocalPort 8091 -State Listen -ErrorAction SilentlyContinue) {
+        throw 'The previous HomeOS instance did not release port 8091; refusing to launch a duplicate.'
     }
     Start-ScheduledTask -TaskName $taskName
-} elseif (-not (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue)) {
+} elseif (-not (Get-NetTCPConnection -LocalPort 8091 -State Listen -ErrorAction SilentlyContinue)) {
     Start-ScheduledTask -TaskName $taskName
 }
 $ready = $false
 for ($attempt = 0; $attempt -lt 30; $attempt++) {
     try {
-        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/v1/health/ready' -TimeoutSec 2
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8091/api/v1/health/ready' -TimeoutSec 2
         if ($health.status -eq 'ready') { $ready = $true; break }
     } catch { }
     Start-Sleep -Seconds 2
 }
-if (-not $ready) { throw 'HomeOS did not become ready on 127.0.0.1:8080.' }
+if (-not $ready) { throw 'HomeOS did not become ready on 127.0.0.1:8091.' }
 Write-Host 'HomeOS PostgreSQL setup is ready. PostgreSQL starts with Windows; HomeOS starts when this user signs in.'

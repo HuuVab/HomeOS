@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import Drive from './Drive'
+import Music from './Music'
 
 type Session = {
   user: { id: number; username: string; displayName: string; role: string }
@@ -28,7 +29,7 @@ type Status = {
 const services = [
   { id: 'overview', label: 'Overview', group: 'Home', description: 'Your HomeOS starting point.', ready: true },
   { id: 'drive', label: 'HomeDrive', group: 'Personal cloud', description: 'Files and folders on your homelab disk.', ready: true },
-  { id: 'music', label: 'HomeMusic', group: 'Personal cloud', description: 'Music library and streaming will be added later.', ready: false },
+  { id: 'music', label: 'HomeMusic', group: 'Personal cloud', description: 'Play music from a folder on your HomeOS server.', ready: true },
   { id: 'photos', label: 'HomePhotos', group: 'Personal cloud', description: 'Photo galleries and albums will be added later.', ready: false },
   { id: 'git', label: 'HomeGit', group: 'Personal cloud', description: 'Repository hosting and browsing will be added later.', ready: false },
   { id: 'sync', label: 'HomeSync', group: 'Personal cloud', description: 'Cross-device synchronization will be added later.', ready: false },
@@ -248,6 +249,7 @@ export default function App() {
         <div className="section-heading"><h2>Services</h2></div>
         <section className="service-grid" aria-label="Available services">
           <article className="service-card"><h3>HomeDrive</h3><p>File storage and folders</p><span className="service-state">Enabled</span><a href="#/drive">Open service</a></article>
+          <article className="service-card"><h3>HomeMusic</h3><p>Music from a server folder</p><span className="service-state">Enabled</span><a href="#/music">Open service</a></article>
           <article className="service-card"><h3>HomeMonitor</h3><p>Host and application metrics</p><span className={`service-state ${error ? 'service-state-error' : ''}`}>{systemOnline ? 'Healthy' : loading && !data ? 'Checking' : 'Unavailable'}</span><a href="#/monitor">Open service</a></article>
         </section>
       </>}
@@ -272,6 +274,7 @@ export default function App() {
       </>}
 
       {activeSection === 'drive' && <Drive csrfToken={session.csrfToken} />}
+      {activeSection === 'music' && <Music />}
 
       {!current.ready && <section className="planned-panel"><span className="planned-badge">Coming soon</span><h2>{current.label} is not active yet</h2><p>{current.description} This page will become its own dashboard as the module is built. No controls are available here yet.</p></section>}
     </main>

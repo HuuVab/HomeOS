@@ -15,7 +15,7 @@ COPY backend/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/homeos ./cmd/homeos
 
 FROM alpine:3.23
-RUN addgroup -S homeos && adduser -S -G homeos homeos && mkdir -p /data && chown homeos:homeos /data
+RUN apk add --no-cache ffmpeg && addgroup -S homeos && adduser -S -G homeos homeos && mkdir -p /data && chown homeos:homeos /data
 WORKDIR /app
 COPY --from=backend-build /out/homeos /app/homeos
 COPY --from=frontend-build /src/frontend/dist /app/web

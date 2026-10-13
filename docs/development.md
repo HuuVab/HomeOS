@@ -31,6 +31,7 @@ Then start the API in one terminal:
 
 ```powershell
 cd backend
+$env:HOMEOS_PORT = '8091'
 go run ./cmd/homeos
 ```
 
@@ -42,7 +43,7 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite and sign in with the administrator credentials. Vite proxies `/api` to the Go server on `127.0.0.1:8080`.
+Open the local URL printed by Vite and sign in with the administrator credentials. Vite proxies `/api` to the Go server on `127.0.0.1:8091`.
 
 To build the static frontend and serve it from Go:
 
@@ -51,10 +52,11 @@ cd frontend
 npm run build
 cd ..\backend
 $env:HOMEOS_WEB_DIR = '..\frontend\dist'
+$env:HOMEOS_PORT = '8091'
 go run ./cmd/homeos
 ```
 
-Open `http://127.0.0.1:8080`.
+Open `http://127.0.0.1:8091`. The native Windows PostgreSQL launcher also uses port 8091, leaving port 8080 available to other local services.
 
 This checkout's local PostgreSQL deployment can be started with `powershell -File .\scripts\start-homeos-postgres.ps1` from the repository root. It connects as the dedicated `homeos_app` role to the `homeos` database, reads its password from ignored `backend/secrets/postgres-password`, and reuses `backend/data/files`. The old SQLite database is retained only as a rollback backup; existing users must sign in again because sessions were not migrated. PostgreSQL 17 must be running before launching the script.
 

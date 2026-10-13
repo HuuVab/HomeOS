@@ -38,6 +38,14 @@ func TestHandlerServesWebWithDriveRoutes(t *testing.T) {
 	if res.Code != 200 || res.Body.String() != "home" {
 		t.Fatalf("web: %d %s", res.Code, res.Body.String())
 	}
+	if err := os.WriteFile(filepath.Join(web, "index.html"), []byte("rebuilt home"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, httptest.NewRequest("GET", "/", nil))
+	if res.Code != 200 || res.Body.String() != "rebuilt home" {
+		t.Fatalf("rebuilt web: %d %s", res.Code, res.Body.String())
+	}
 }
 
 func testHandler(t *testing.T) (http.Handler, *store.Store) {

@@ -46,6 +46,7 @@ func newHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 	}
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, db, accelerator)
+	registerMusicRoutes(mux, db)
 	driveHandler := func(w http.ResponseWriter, r *http.Request) {
 		user, _, _, ok := authenticate(w, r, db)
 		if !ok {
@@ -239,10 +240,15 @@ func newHandler(webDir string, db *store.Store, collector monitor.Collector, fil
 	})
 
 	if webDir != "" {
-		if index, err := os.ReadFile(filepath.Join(webDir, "index.html")); err == nil {
+		if _, err := os.Stat(filepath.Join(webDir, "index.html")); err == nil {
 			files := http.FileServer(http.Dir(webDir))
 			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/" {
+					index, err := os.ReadFile(filepath.Join(webDir, "index.html"))
+					if err != nil {
+						http.Error(w, "HomeOS frontend is unavailable", http.StatusServiceUnavailable)
+						return
+					}
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.Header().Set("Cache-Control", "no-store")
 					_, _ = w.Write(index)

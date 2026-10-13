@@ -11,6 +11,7 @@ $env:HOMEOS_DATABASE_PASSWORD_FILE = $passwordFile
 $env:HOMEOS_DATA_DIR = Join-Path $backend 'data'
 $env:HOMEOS_WEB_DIR = $web
 $env:HOMEOS_BIND_ADDR = '127.0.0.1'
+$env:HOMEOS_PORT = '8091'
 $pgReady = 'C:\Program Files\PostgreSQL\17\bin\pg_isready.exe'
 if (-not (Test-Path -LiteralPath $pgReady -PathType Leaf)) {
     throw "PostgreSQL 17 is not installed at the expected location: $pgReady"

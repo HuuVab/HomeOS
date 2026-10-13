@@ -30,7 +30,7 @@ function Add-TextBox($top, $value, $width) {
     return $control
 }
 Add-Label 'Server' 18
-$server = Add-TextBox 16 'http://127.0.0.1:8080' 600
+$server = Add-TextBox 16 'http://127.0.0.1:8091' 600
 Add-Label 'Username' 51
 $username = Add-TextBox 49 '' 240
 Add-Label 'Password' 84

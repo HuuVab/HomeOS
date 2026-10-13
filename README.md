@@ -26,6 +26,8 @@ The [deployment and backup guide](docs/deployment.md) describes Docker packaging
 
 The [HomeDrive v0.2 guide](docs/v0.2-homedrive.md) documents its storage boundaries, API, large-file behavior, and separate file-backup requirement. The web app has a service sidebar; unfinished modules are explicitly marked as planned.
 
+HomeMusic lets an administrator enter an absolute folder path on the HomeOS server and play audio files directly from that folder. The list covers files in the selected folder (not subfolders). The server process must be able to read it; for Docker deployments, mount the music directory into the container and enter its path inside the container. Playback depends on the browser's supported audio formats. Song title, artist, album, duration, and embedded cover art are read with FFmpeg tools (included in the Docker image); without them, HomeMusic falls back to filenames, unknown metadata, and placeholder art.
+
 The [HomeDrive architecture addendum](HomeDrive_Architecture_Addendum.md) records the additive PostgreSQL, SQLite sync-client, Redis, and gRPC decisions. PostgreSQL support, the expanded metadata schema, an in-process metadata gRPC increment, opt-in Redis listing cache/login limits, and a [manual desktop sync prototype](docs/homedrive-sync-prototype.md) are implemented; full bidirectional sync, messaging, and observability remain staged work.
 
 ## Planned repository layout
