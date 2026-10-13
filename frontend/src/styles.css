@@ -419,6 +419,9 @@ form > input { margin-bottom: 16px; }
 .music-player { border-top-color: #303136; background: #171719; }
 .music-controls button, .music-volume button { color: #c4c7cc; }
 .music-controls button:hover, .music-volume button:hover { color: var(--music-accent); }
+.music-controls .music-shuffle-button { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 0 4px; font-size: 11px; font-weight: 600; }
+.music-shuffle-button svg { flex: 0 0 auto; fill: none; stroke-width: 2; }
+.music-shuffle-button[aria-pressed="true"] { background: #17384f; border-radius: 6px; }
 .music-controls .music-play-button:hover { background: #49b7f0; color: #06111c; }
 .music-timeline, .music-volume { color: #a0a4ad; }
 .music-timeline input { background: linear-gradient(to right, #36b4ff var(--progress), #5d6368 var(--progress)); }
