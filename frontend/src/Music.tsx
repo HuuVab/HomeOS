@@ -21,6 +21,15 @@ function writeMusicCache(userId: number, cache: MusicCache) {
 }
 
 const songCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+function trackKey(track: Track) { return track.id || track.path || track.name }
+function shuffledKeys(keys: string[]) {
+  const result = [...keys]
+  for (let index = result.length - 1; index > 0; index--) {
+    const other = Math.floor(Math.random() * (index + 1))
+    ;[result[index], result[other]] = [result[other], result[index]]
+  }
+  return result
+}
 
 function title(name: string) { return name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') }
 function time(value: number) {
@@ -75,6 +84,9 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   const loadRequest = useRef(0)
   const lastPositionSave = useRef(0)
   const catalogQuery = useRef('')
+  const shuffleScope = useRef('')
+  const shuffleRemaining = useRef<string[]>([])
+  const shuffleHistory = useRef<string[]>([])
   const active = tracks.find((track) => track.id && track.id === activeID) ?? activeSnapshot
   const search = query.trim().toLocaleLowerCase()
   const visibleTracks = tracks.map((track, position) => ({ track, position })).filter(({ track }) =>
@@ -298,11 +310,26 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
     else { setSortBy(next); setSortDescending(false) }
   }
 
-  function playTrack(next: number) {
+  function ensureShufflePool() {
+    const keys = visibleTracks.map(({ track }) => trackKey(track))
+    const scope = [...keys].sort().join('\u0000')
+    if (shuffleScope.current !== scope) {
+      shuffleScope.current = scope
+      shuffleRemaining.current = shuffledKeys(keys.filter((key) => key !== (active && trackKey(active))))
+      shuffleHistory.current = []
+    }
+  }
+
+  function playTrack(next: number, remember = true) {
     if (next < 0 || next >= tracks.length) return
     if (tracks[next].id ? tracks[next].id === activeID : next === index) {
       if (audio.current?.paused) void audio.current.play().catch(() => setError('This audio format could not be played.'))
       return
+    }
+    if (personal?.player.shuffle) {
+      ensureShufflePool()
+      if (remember && active) shuffleHistory.current.push(trackKey(active))
+      shuffleRemaining.current = shuffleRemaining.current.filter((key) => key !== trackKey(tracks[next]))
     }
     setError('')
     setIndex(next)
@@ -335,20 +362,45 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
       return
     }
     if (!visibleTracks.length) return
+    if (personal?.player.shuffle) {
+      ensureShufflePool()
+      if (direction < 0) {
+        while (shuffleHistory.current.length) {
+          const previous = shuffleHistory.current.pop()!
+          const item = visibleTracks.find(({ track }) => trackKey(track) === previous)
+          if (item) {
+            if (active) shuffleRemaining.current.push(trackKey(active))
+            playTrack(item.position, false)
+            return
+          }
+        }
+        return
+      }
+      if (!shuffleRemaining.current.length) {
+        if (personal.player.repeat !== 'all') return
+        const keys = visibleTracks.map(({ track }) => trackKey(track))
+        shuffleRemaining.current = shuffledKeys(keys.length > 1 ? keys.filter((key) => key !== (active && trackKey(active))) : keys)
+      }
+      const next = shuffleRemaining.current.pop()
+      const item = visibleTracks.find(({ track }) => trackKey(track) === next)
+      if (item) playTrack(item.position)
+      return
+    }
     const current = visibleTracks.findIndex((item) => item.track.id ? item.track.id === activeID : item.position === index)
-    const next = direction > 0 && personal?.player.shuffle && visibleTracks.length > 1 ? (current + 1 + Math.floor(Math.random() * (visibleTracks.length - 1))) % visibleTracks.length : current < 0 ? 0 : (current + direction + visibleTracks.length) % visibleTracks.length
+    const next = current < 0 ? 0 : (current + direction + visibleTracks.length) % visibleTracks.length
     playTrack(visibleTracks[next].position)
   }
 
   function songEnded() {
     if (personal?.player.repeat === 'one' && audio.current) { audio.current.currentTime = 0; void audio.current.play(); return }
     const current = visibleTracks.findIndex((item) => item.track.id ? item.track.id === activeID : item.position === index)
-    if (personal?.player.repeat === 'off' && current === visibleTracks.length - 1 && !personal.queue.length) return
+    if (!personal?.player.shuffle && personal?.player.repeat === 'off' && current === visibleTracks.length - 1 && !personal.queue.length) return
     skip(1)
   }
 
   async function toggleMode(mode: 'shuffle' | 'repeat') {
     if (!personal) return
+    if (mode === 'shuffle') { shuffleScope.current = ''; shuffleRemaining.current = []; shuffleHistory.current = [] }
     const player = { ...personal.player, shuffle: mode === 'shuffle' ? !personal.player.shuffle : personal.player.shuffle, repeat: mode === 'repeat' ? personal.player.repeat === 'off' ? 'all' as const : personal.player.repeat === 'all' ? 'one' as const : 'off' as const : personal.player.repeat }
     const next = { ...personal, player }
     setPersonal(next)
@@ -413,7 +465,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
         <div className="music-controls">
           {catalogMode && <button type="button" className="music-shuffle-button" aria-label="Shuffle" title={personal?.player.shuffle ? 'Shuffle on' : 'Shuffle off'} aria-pressed={personal?.player.shuffle ?? false} disabled={!personal} onClick={() => void toggleMode('shuffle')}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3c4 0 6 10 10 10h3m-3-3 3 3-3 3M4 17h3c1.5 0 2.7-1.3 3.8-3M14 10c1-1.8 2-3 3-3h3m-3-3 3 3-3 3" /></svg><span>Shuffle</span></button>}
           <button type="button" aria-label="Previous track" onClick={() => skip(-1)} disabled={!visibleTracks.length}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M19 5 7 12l12 7z" /></svg></button>
-          <button type="button" className="music-play-button" aria-label={playing ? 'Pause' : 'Play'} onClick={() => { if (!active && visibleTracks.length) playTrack(visibleTracks[0].position); else if (playing) audio.current?.pause(); else void audio.current?.play().catch(() => setError('This audio format could not be played.')) }} disabled={!active && !visibleTracks.length}>{playing ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M17 5v14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z" /></svg>}</button>
+          <button type="button" className="music-play-button" aria-label={playing ? 'Pause' : 'Play'} onClick={() => { if (!active && visibleTracks.length) { if (personal?.player.shuffle) skip(1); else playTrack(visibleTracks[0].position) } else if (playing) audio.current?.pause(); else void audio.current?.play().catch(() => setError('This audio format could not be played.')) }} disabled={!active && !visibleTracks.length}>{playing ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M17 5v14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z" /></svg>}</button>
           <button type="button" aria-label="Next track" onClick={() => skip(1)} disabled={!visibleTracks.length && !personal?.queue.length}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M5 5l12 7-12 7z" /></svg></button>
           {catalogMode && <button type="button" aria-label={`Repeat ${personal?.player.repeat ?? 'off'}`} aria-pressed={personal ? personal.player.repeat !== 'off' : false} onClick={() => void toggleMode('repeat')}>↻{personal?.player.repeat === 'one' ? '₁' : ''}</button>}
         </div>
