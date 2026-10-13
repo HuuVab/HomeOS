@@ -37,6 +37,10 @@ function normalizationFactor(track: Track | undefined, enabled: boolean, catalog
   return 10 ** (delta / 20)
 }
 
+function searchText(value: string) {
+  return value.normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/g, 'd').toLocaleLowerCase()
+}
+
 function title(name: string) { return name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') }
 function time(value: number) {
   if (!Number.isFinite(value)) return '0:00'
@@ -100,9 +104,9 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   const shuffleHistory = useRef<string[]>([])
   const deletedTrackID = useRef('')
   const active = tracks.find((track) => track.id && track.id === activeID) ?? activeSnapshot
-  const search = query.trim().toLocaleLowerCase()
+  const search = searchText(query.trim())
   const visibleTracks = tracks.map((track, position) => ({ track, position })).filter(({ track }) =>
-    [track.title, track.artist, track.album].some((value) => value.toLocaleLowerCase().includes(search)))
+    [track.title, track.artist, track.album].some((value) => searchText(value).includes(search)))
   if (sortBy) visibleTracks.sort((left, right) => {
     const first = left.track[sortBy]
     const second = right.track[sortBy]

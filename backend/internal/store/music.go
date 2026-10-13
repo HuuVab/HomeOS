@@ -142,7 +142,7 @@ func (s *Store) MusicTracks(ctx context.Context, root, query, artist, album, fol
 	} else {
 		order += " ASC"
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+musicTrackColumns+` FROM music.tracks WHERE available=true AND $1<>'' AND left(path,length($1))=$1 AND ($2='' OR lower(title) LIKE '%'||lower($2)||'%' OR lower(artist) LIKE '%'||lower($2)||'%' OR lower(album) LIKE '%'||lower($2)||'%') AND ($3='' OR lower(artist)=lower($3)) AND ($4='' OR lower(album)=lower($4)) AND ($5='' OR left(path,length($5))=$5) ORDER BY `+order+`,id LIMIT $6 OFFSET $7`, musicPathPrefix(root), query, artist, album, musicPathPrefix(folder), limit, offset)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+musicTrackColumns+` FROM music.tracks WHERE available=true AND $1<>'' AND left(path,length($1))=$1 AND ($2='' OR public.unaccent(lower(title)) LIKE '%'||public.unaccent(lower($2))||'%' OR public.unaccent(lower(artist)) LIKE '%'||public.unaccent(lower($2))||'%' OR public.unaccent(lower(album)) LIKE '%'||public.unaccent(lower($2))||'%') AND ($3='' OR lower(artist)=lower($3)) AND ($4='' OR lower(album)=lower($4)) AND ($5='' OR left(path,length($5))=$5) ORDER BY `+order+`,id LIMIT $6 OFFSET $7`, musicPathPrefix(root), query, artist, album, musicPathPrefix(folder), limit, offset)
 	if err != nil {
 		return nil, err
 	}
