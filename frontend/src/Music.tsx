@@ -5,6 +5,20 @@ type FolderListing = { path: string; parent: string; folders: { name: string; pa
 type SortKey = 'title' | 'artist' | 'duration'
 type Playlist = { id: string; name: string; trackIds: string[] }
 type Personal = { favorites: string[]; recent: Track[]; playCounts: Record<string, number>; playlists: Playlist[]; queue: string[]; player: { trackId: string; position: number; shuffle: boolean; repeat: 'off' | 'all' | 'one' } }
+type MusicCache = { root: string; tracks: Track[]; hasMore: boolean; scanError: string }
+
+function musicCacheKey(userId: number) { return `homeos.music.catalog.v1.${userId}` }
+function readMusicCache(userId: number): MusicCache | null {
+  try {
+    const value = sessionStorage.getItem(musicCacheKey(userId))
+    if (!value) return null
+    const cache = JSON.parse(value) as MusicCache
+    return typeof cache.root === 'string' && Array.isArray(cache.tracks) ? cache : null
+  } catch { return null }
+}
+function writeMusicCache(userId: number, cache: MusicCache) {
+  try { sessionStorage.setItem(musicCacheKey(userId), JSON.stringify(cache)) } catch { /* Storage may be disabled or full. */ }
+}
 
 const songCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
@@ -19,15 +33,17 @@ function CoverArt({ track, folder, large = false }: { track?: Track; folder: str
   return <span className="music-art" aria-hidden="true">♫{source && <img key={source} src={source} alt="" loading={large ? 'eager' : 'lazy'} onError={(event) => { event.currentTarget.hidden = true }} />}</span>
 }
 
-export default function Music({ csrfToken }: { csrfToken: string }) {
-  const [path, setPath] = useState(() => localStorage.getItem('homeos.music.path') ?? '')
-  const [folder, setFolder] = useState('')
-  const [tracks, setTracks] = useState<Track[]>([])
-  const [catalogMode, setCatalogMode] = useState(false)
+export default function Music({ csrfToken, userId }: { csrfToken: string; userId: number }) {
+  const [cached] = useState(() => readMusicCache(userId))
+  const [path, setPath] = useState(() => cached?.root || localStorage.getItem('homeos.music.path') || '')
+  const [folder, setFolder] = useState(() => cached?.root ?? '')
+  const [tracks, setTracks] = useState<Track[]>(() => cached?.tracks ?? [])
+  const [catalogMode, setCatalogMode] = useState(() => Boolean(cached?.root))
+  const [libraryReady, setLibraryReady] = useState(false)
   const [activeID, setActiveID] = useState('')
   const [activeSnapshot, setActiveSnapshot] = useState<Track | undefined>()
-  const [hasMore, setHasMore] = useState(false)
-  const [scanError, setScanError] = useState('')
+  const [hasMore, setHasMore] = useState(() => cached?.hasMore ?? false)
+  const [scanError, setScanError] = useState(() => cached?.scanError ?? '')
   const [personal, setPersonal] = useState<Personal | null>(null)
   const [collection, setCollection] = useState('library')
   const [playlistName, setPlaylistName] = useState('')
@@ -42,7 +58,7 @@ export default function Music({ csrfToken }: { csrfToken: string }) {
   const [query, setQuery] = useState('')
   const [sortBy, setSortBy] = useState<SortKey | null>(null)
   const [sortDescending, setSortDescending] = useState(false)
-  const [showFolderPicker, setShowFolderPicker] = useState(() => !localStorage.getItem('homeos.music.path'))
+  const [showFolderPicker, setShowFolderPicker] = useState(() => !cached?.root && !localStorage.getItem('homeos.music.path'))
   const [index, setIndex] = useState(-1)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -79,8 +95,15 @@ export default function Music({ csrfToken }: { csrfToken: string }) {
         const response = await fetch('/api/v1/music/library')
         if (!response.ok) throw new Error('Could not load music library')
         const library = await response.json() as { root: string }
-        if (library.root) { setCatalogMode(true); setFolder(library.root); setPath(library.root); setShowFolderPicker(false); return }
-      } catch { /* SQLite installations still use the original folder API. */ }
+        if (library.root) {
+          if (cached?.root && cached.root !== library.root) { setTracks([]); setHasMore(false); sessionStorage.removeItem(musicCacheKey(userId)) }
+          setCatalogMode(true); setFolder(library.root); setPath(library.root); setShowFolderPicker(false); setLibraryReady(true); return
+        }
+      } catch {
+        if (cached?.root) { setError('Could not check the music library. Showing the last saved list.'); return }
+        /* SQLite installations still use the original folder API. */
+      }
+      if (cached) { setCatalogMode(false); setFolder(''); setTracks([]); sessionStorage.removeItem(musicCacheKey(userId)) }
       const saved = localStorage.getItem('homeos.music.path')
       if (saved) void loadFolder(saved)
     })()
@@ -154,11 +177,11 @@ export default function Music({ csrfToken }: { csrfToken: string }) {
   }
 
   useEffect(() => {
-    if (!catalogMode || !folder) return
-    const timer = window.setTimeout(() => void refreshCatalog(), 250)
+    if (!catalogMode || !folder || !libraryReady) return
+    const timer = window.setTimeout(() => void refreshCatalog(), query.trim() ? 250 : 0)
     const interval = window.setInterval(() => void refreshCatalog(), 15000)
     return () => { window.clearTimeout(timer); window.clearInterval(interval) }
-  }, [catalogMode, folder, query, sortBy, sortDescending, collection, personal?.recent, artistFilter, albumFilter, folderFilter])
+  }, [catalogMode, folder, libraryReady, query, sortBy, sortDescending, collection, personal?.recent, artistFilter, albumFilter, folderFilter])
 
   async function refreshCatalog(offset = 0) {
     if (collection !== 'library') {
@@ -188,6 +211,9 @@ export default function Music({ csrfToken }: { csrfToken: string }) {
     })
     setHasMore(data.tracks.length === 500)
     setScanError(data.scanError ?? '')
+    if (offset === 0 && !query.trim() && !artistFilter.trim() && !albumFilter.trim() && !folderFilter.trim() && !sortBy) {
+      writeMusicCache(userId, { root: folder, tracks: data.tracks, hasMore: data.tracks.length === 500, scanError: data.scanError ?? '' })
+    }
   }
 
   function changeVolume(next: number) {
@@ -203,7 +229,8 @@ export default function Music({ csrfToken }: { csrfToken: string }) {
       if (response.ok) {
         const data = await response.json() as { root: string }
         audio.current?.pause(); setPlaying(false); setActiveID(''); setActiveSnapshot(undefined); setIndex(-1)
-        setCatalogMode(true); setFolder(data.root); setPath(data.root); setTracks([]); setShowFolderPicker(false); setBrowserOpen(false); setError('')
+        sessionStorage.removeItem(musicCacheKey(userId))
+        setCatalogMode(true); setLibraryReady(true); setFolder(data.root); setPath(data.root); setTracks([]); setShowFolderPicker(false); setBrowserOpen(false); setError('')
         setCollection('library'); void loadPersonal(false)
         localStorage.setItem('homeos.music.path', data.root)
         return
@@ -236,6 +263,7 @@ export default function Music({ csrfToken }: { csrfToken: string }) {
       setDuration(0)
       setTracks(data.tracks)
       setCatalogMode(false)
+      setLibraryReady(false)
       setFolder(next)
       setPath(next)
       setBrowserOpen(false)

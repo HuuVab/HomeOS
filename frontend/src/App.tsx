@@ -71,8 +71,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeSection, setActiveSection] = useState(sectionFromHash)
+  const [musicVisited, setMusicVisited] = useState(() => sectionFromHash() === 'music')
   const [navOpen, setNavOpen] = useState(false)
   const activeRequest = useRef<AbortController | null>(null)
+
+  useEffect(() => { if (activeSection === 'music') setMusicVisited(true) }, [activeSection])
 
   useEffect(() => {
     const onHashChange = () => {
@@ -274,7 +277,7 @@ export default function App() {
       </>}
 
       {activeSection === 'drive' && <Drive csrfToken={session.csrfToken} />}
-      {activeSection === 'music' && <Music csrfToken={session.csrfToken} />}
+      {musicVisited && <div hidden={activeSection !== 'music'}><Music csrfToken={session.csrfToken} userId={session.user.id} /></div>}
 
       {!current.ready && <section className="planned-panel"><span className="planned-badge">Coming soon</span><h2>{current.label} is not active yet</h2><p>{current.description} This page will become its own dashboard as the module is built. No controls are available here yet.</p></section>}
     </main>

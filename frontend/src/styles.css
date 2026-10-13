@@ -380,7 +380,7 @@ form > input { margin-bottom: 16px; }
 @media (max-width: 480px) { .music-library { padding: 16px 12px 24px; } .music-folder-form > div { flex-direction: column; } .music-heading { align-items: flex-start; } .music-heading-actions { flex-direction: column; align-items: flex-end; gap: 4px; } .music-player { grid-template-columns: 1fr; gap: 10px; } .music-now { justify-content: center; } .music-volume { grid-column: 1; justify-self: center; } .music-table-head, .music-row { grid-template-columns: 24px minmax(0, 1fr) 48px; gap: 6px; } .music-track .music-art { display: none; } }
 
 /* HomeMusic shares HomeDrive's panel, toolbar, table, and action language. */
-.music { --music-accent: #36b4ff; border-color: #303136; border-radius: 14px; background: #171719; color: #f3f4f6; box-shadow: 0 18px 48px rgba(0, 0, 0, .14); }
+.music { --music-accent: #36b4ff; container: music-panel / inline-size; border-color: #303136; border-radius: 14px; background: #171719; color: #f3f4f6; box-shadow: 0 18px 48px rgba(0, 0, 0, .14); }
 .music-library { padding: 0 0 20px; }
 .music-folder-form { margin: 16px; padding: 16px; border: 1px solid #383a40; border-radius: 9px; background: #202124; }
 .music-folder-form label { color: #f3f4f6; font-weight: 650; }
@@ -447,9 +447,35 @@ form > input { margin-bottom: 16px; }
 .music-player-actions > button { min-width: 28px; min-height: 28px; border: 0; background: transparent; color: #c4c7cc; font-size: 18px; }
 .music-player-actions > button:hover, .music-controls button[aria-pressed="true"] { color: #36b4ff; }
 .music-player-actions .music-volume { width: 120px; }
-@media (max-width: 760px) { .music-player-actions { grid-column: 2; } .music-heading-actions { flex-wrap: wrap; justify-content: flex-end; } }
-@media (max-width: 480px) { .music-player-actions { grid-column: 1; justify-self: center; } }
-@media (max-width: 600px) { .music-filters { flex-direction: column; } }
+.music-now > span:nth-child(2) { flex: 1 1 auto; display: grid; min-width: 0; }
+.music-player > *, .music-playback, .music-timeline { min-width: 0; }
+.music-timeline input { min-width: 0; }
 @media (max-width: 1100px) { .music-table-head, .music-row { grid-template-columns: 32px minmax(150px, 2fr) minmax(100px, 1fr) 56px; } }
 @media (max-width: 760px) { .music-table-head, .music-row { grid-template-columns: 32px minmax(0, 1fr) 56px; } }
+@container music-panel (max-width: 1000px) {
+  .music-player { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .music-now { grid-column: 1; grid-row: 1; }
+  .music-player-actions { grid-column: 2; grid-row: 1; }
+  .music-playback { grid-column: 1 / -1; grid-row: 2; max-width: none; }
+  .music-heading { align-items: flex-start; flex-wrap: wrap; }
+  .music-heading-actions { flex: 1 1 100%; flex-wrap: wrap; gap: 4px 8px; }
+  .music-table-head, .music-row { grid-template-columns: 32px minmax(0, 2fr) minmax(0, 1fr) 56px; }
+  .music-album, .music-table-head > span:nth-child(4) { display: none; }
+}
+@container music-panel (max-width: 560px) {
+  .music-table-head, .music-row { grid-template-columns: 24px minmax(0, 1fr) 48px; gap: 6px; }
+  .music-artist, .music-table-head > :nth-child(3) { display: none; }
+  .music-player { padding: 10px 12px; }
+  .music-player-actions .music-volume { width: 88px; }
+}
+@container music-panel (max-width: 390px) {
+  .music-player { grid-template-columns: minmax(0, 1fr); }
+  .music-now { grid-column: 1; }
+  .music-player-actions { grid-column: 1; grid-row: 3; justify-self: center; }
+  .music-playback { grid-column: 1; }
+  .music-heading-actions { flex-direction: row; justify-content: flex-start; }
+  .music-track .music-art { display: none; }
+}
+@media (max-width: 760px) { .music-heading-actions { flex-wrap: wrap; } }
+@media (max-width: 600px) { .music-filters { flex-direction: column; } }
 @media (max-width: 480px) { .music-folder-form { margin: 12px; } .music-search { margin: 12px 12px 4px; } .music-table-head, .music-row { grid-template-columns: 24px minmax(0, 1fr) 48px; gap: 6px; } .music-heading { align-items: flex-start; } }
