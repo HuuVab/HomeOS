@@ -37,6 +37,13 @@ function normalizationFactor(track: Track | undefined, enabled: boolean, catalog
   return 10 ** (delta / 20)
 }
 
+function enablePlaybackAudioSession() {
+  try {
+    const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession
+    if (session) session.type = 'playback'
+  } catch { /* Browsers without Audio Session still use the media element. */ }
+}
+
 function searchText(value: string) {
   return value.normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/g, 'd').toLocaleLowerCase()
 }
@@ -125,6 +132,8 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   }, [active?.id, active?.loudnessLufs, autoLevel, catalogMode])
 
   function ensureAudioGraph() {
+    // iOS treats Web Audio as ambient unless the page opts into media playback.
+    enablePlaybackAudioSession()
     if (audioContext.current) { void audioContext.current.resume(); return }
     if (!audio.current || !window.AudioContext) { if (audio.current) audio.current.volume = volume; return }
     try {
@@ -475,6 +484,53 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
     if (!personal?.player.shuffle && personal?.player.repeat === 'off' && current === visibleTracks.length - 1 && !personal.queue.length) return
     skip(1)
   }
+
+  const mediaActions = useRef({
+    play: () => {}, pause: () => {}, previous: () => {}, next: () => {}, seek: (_position: number) => {},
+  })
+  mediaActions.current = {
+    play: () => { ensureAudioGraph(); void audio.current?.play().catch(() => setError('This audio format could not be played.')) },
+    pause: () => audio.current?.pause(),
+    previous: () => skip(-1),
+    next: () => skip(1),
+    seek: (position: number) => { if (audio.current) audio.current.currentTime = position },
+  }
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    const session = navigator.mediaSession
+    const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+      ['play', () => mediaActions.current.play()],
+      ['pause', () => mediaActions.current.pause()],
+      ['previoustrack', () => mediaActions.current.previous()],
+      ['nexttrack', () => mediaActions.current.next()],
+      ['seekto', (details) => { if (details.seekTime != null) mediaActions.current.seek(details.seekTime) }],
+    ]
+    for (const [action, handler] of handlers) {
+      try { session.setActionHandler(action, handler) } catch { /* This action is unsupported. */ }
+    }
+    return () => { for (const [action] of handlers) { try { session.setActionHandler(action, null) } catch { /* Unsupported action. */ } } }
+  }, [])
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    navigator.mediaSession.metadata = active && 'MediaMetadata' in window ? new MediaMetadata({
+      title: active.title || title(active.name), artist: active.artist || 'Unknown artist', album: active.album,
+      artwork: active.hasCover ? [{ src: new URL(active.id ? `/api/v1/music/cover?id=${encodeURIComponent(active.id)}` : `/api/v1/music/cover?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(active.name)}`, location.href).href }] : [],
+    }) : null
+  }, [active?.id, active?.name, active?.title, active?.artist, active?.album, active?.hasCover, folder])
+  useEffect(() => {
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused'
+  }, [playing])
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !Number.isFinite(duration) || duration <= 0) return
+    try { navigator.mediaSession.setPositionState({ duration, position: Math.min(Math.max(currentTime, 0), duration) }) } catch { /* Position controls are optional. */ }
+  }, [currentTime, duration])
+  useEffect(() => {
+    const resumeOnReturn = () => {
+      if (document.visibilityState === 'visible' && audioContext.current && !audio.current?.paused) void audioContext.current.resume().catch(() => {})
+    }
+    document.addEventListener('visibilitychange', resumeOnReturn)
+    return () => document.removeEventListener('visibilitychange', resumeOnReturn)
+  }, [])
 
   async function toggleMode(mode: 'shuffle' | 'repeat') {
     if (!personal) return
