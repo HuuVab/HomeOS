@@ -66,3 +66,31 @@ func TestMusicFolderAndPlayback(t *testing.T) {
 		t.Fatalf("non-audio = %d", response.Code)
 	}
 }
+
+func TestRemoveMusicTrackFileStaysInLibrary(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	inside := filepath.Join(root, "album", "song.mp3")
+	if err := os.Mkdir(filepath.Dir(inside), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inside, []byte("audio"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(other, "song.mp3")
+	if err := os.WriteFile(outside, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeMusicTrackFile(root, outside); err == nil {
+		t.Fatal("removed a file outside the library")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("outside file changed: %v", err)
+	}
+	if err := removeMusicTrackFile(root, inside); err != nil {
+		t.Fatalf("remove library track: %v", err)
+	}
+	if _, err := os.Stat(inside); !os.IsNotExist(err) {
+		t.Fatalf("library track still exists: %v", err)
+	}
+}

@@ -75,6 +75,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   const [volume, setVolume] = useState(0.8)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [deletingID, setDeletingID] = useState('')
   const [browserOpen, setBrowserOpen] = useState(false)
   const [browserLoading, setBrowserLoading] = useState(false)
   const [browserError, setBrowserError] = useState('')
@@ -87,6 +88,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   const shuffleScope = useRef('')
   const shuffleRemaining = useRef<string[]>([])
   const shuffleHistory = useRef<string[]>([])
+  const deletedTrackID = useRef('')
   const active = tracks.find((track) => track.id && track.id === activeID) ?? activeSnapshot
   const search = query.trim().toLocaleLowerCase()
   const visibleTracks = tracks.map((track, position) => ({ track, position })).filter(({ track }) =>
@@ -182,6 +184,34 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
     const response = await fetch(`/api/v1/music/playlists/${playlist.id}`, { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken } })
     if (response.ok) { if (collection === playlist.id) setCollection('library'); void loadPersonal(false) }
     else setError('Could not delete playlist')
+  }
+
+  async function deleteTrack(track: Track) {
+    if (!track.id || !window.confirm(`Delete “${track.title || title(track.name)}” from the server disk?\n\nThis permanently removes ${track.path || track.name}.`)) return
+    setDeletingID(track.id)
+    try {
+      const response = await fetch(`/api/v1/music/tracks/${encodeURIComponent(track.id)}`, { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken } })
+      if (!response.ok) {
+        const data = await response.json().catch(() => null)
+        throw new Error(data?.error?.message ?? 'Could not delete this song')
+      }
+      if (activeID === track.id) {
+        deletedTrackID.current = track.id
+        audio.current?.pause()
+        setActiveID(''); setActiveSnapshot(undefined); setIndex(-1); setPlaying(false); setCurrentTime(0); setDuration(0); setResumePosition(0)
+      }
+      setTracks((current) => current.filter((item) => item.id !== track.id))
+      const cache = readMusicCache(userId)
+      if (cache?.root === folder) writeMusicCache(userId, { ...cache, tracks: cache.tracks.filter((item) => item.id !== track.id) })
+      setPersonal((current) => current ? { ...current, queue: current.queue.filter((id) => id !== track.id), player: current.player.trackId === track.id ? { ...current.player, trackId: '', position: 0 } : current.player } : current)
+      setError('')
+      void refreshCatalog()
+      void loadPersonal(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not delete this song')
+    } finally {
+      setDeletingID('')
+    }
   }
 
   async function setQueue(ids: string[]) {
@@ -430,12 +460,14 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
       </div>}
       {error && <p className="music-error" role="alert">{error}</p>}
       {scanError && <p className="music-error" role="status">Library scan: {scanError}</p>}
+      <div className="music-library-toolbar">
       {folder && <div className="music-search"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, artist, or album" aria-label="Search songs by title, artist, or album" /></div>}
       <div className={`music-heading ${showFolderPicker ? '' : 'is-compact'}`}>
         <div><p className="eyebrow">Your library</p><h2>{folder ? collection === 'library' ? 'Music' : collection === 'favorites' ? 'Liked songs' : collection === 'recent' ? 'Recently played' : personal?.playlists.find((item) => item.id === collection)?.name ?? 'Playlist' : loading ? 'Loading music…' : 'Choose a folder'}</h2></div>
         <div className="music-heading-actions"><span>{tracks.length}{hasMore ? '+' : ''} {tracks.length === 1 ? 'track' : 'tracks'}</span>{catalogMode && <><button type="button" onClick={() => setCollection('library')}>All songs</button><button type="button" onClick={() => setCollection('favorites')}>Liked</button><button type="button" onClick={() => setCollection('recent')}>Recent</button><button type="button" onClick={() => setShowPlaylists((value) => !value)}>Playlists</button><button type="button" onClick={() => setShowFilters((value) => !value)}>Filters</button></>}{folder && <button type="button" className="secondary-button" onClick={() => setShowFolderPicker((current) => !current)}>{showFolderPicker ? 'Hide folder controls' : 'Change folder'}</button>}</div>
       </div>
       {folder && <p className="music-path" title={folder}>{folder}</p>}
+      </div>
       {catalogMode && showFilters && <div className="music-filters"><input aria-label="Filter by artist" placeholder="Artist" value={artistFilter} onChange={(event) => setArtistFilter(event.target.value)} /><input aria-label="Filter by album" placeholder="Album" value={albumFilter} onChange={(event) => setAlbumFilter(event.target.value)} /><input aria-label="Filter by folder" placeholder="Folder path" value={folderFilter} onChange={(event) => setFolderFilter(event.target.value)} /></div>}
       {catalogMode && showPlaylists && <div className="music-playlists">
         <div className="music-playlist-create"><input aria-label="New playlist name" value={playlistName} onChange={(event) => setPlaylistName(event.target.value)} placeholder="New playlist name" /><button type="button" onClick={() => void createPlaylist()}>Create playlist</button></div>
@@ -444,7 +476,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
       {catalogMode && showQueue && <div className="music-playlists"><strong>Up next</strong>{personal?.queue.map((id, position) => <div className="music-playlist-item" key={`${id}-${position}`}><span>{tracks.find((track) => track.id === id)?.title ?? id}</span><button type="button" aria-label="Move queued song up" disabled={position === 0} onClick={() => { const next = [...personal.queue]; [next[position - 1], next[position]] = [next[position], next[position - 1]]; void setQueue(next) }}>↑</button><button type="button" aria-label="Move queued song down" disabled={position === personal.queue.length - 1} onClick={() => { const next = [...personal.queue]; [next[position + 1], next[position]] = [next[position], next[position + 1]]; void setQueue(next) }}>↓</button><button type="button" onClick={() => void setQueue(personal.queue.filter((_, index) => index !== position))}>Remove</button></div>)}{!personal?.queue.length && <small>Queue is empty.</small>}</div>}
       <div className="music-table-head"><span>#</span><button type="button" className="music-sort-button" onClick={() => changeSort('title')} aria-label={`Sort by title${sortBy === 'title' ? `, ${sortDescending ? 'descending' : 'ascending'}` : ''}`}>Title {sortBy === 'title' && (sortDescending ? '↓' : '↑')}</button><button type="button" className="music-sort-button" onClick={() => changeSort('artist')} aria-label={`Sort by artist${sortBy === 'artist' ? `, ${sortDescending ? 'descending' : 'ascending'}` : ''}`}>Artist {sortBy === 'artist' && (sortDescending ? '↓' : '↑')}</button><span>Album</span><button type="button" className="music-sort-button music-sort-duration" onClick={() => changeSort('duration')} aria-label={`Sort by duration${sortBy === 'duration' ? `, ${sortDescending ? 'descending' : 'ascending'}` : ''}`}>◷ {sortBy === 'duration' && (sortDescending ? '↓' : '↑')}</button></div>
       <ol className="music-list">
-        {visibleTracks.map(({ track, position }, rowNumber) => <li key={track.id ?? track.name}>
+        {visibleTracks.map(({ track, position }, rowNumber) => <li className="music-list-item" key={track.id ?? track.name}>
           <button className={`music-row ${(track.id ? activeID === track.id : index === position) ? 'is-current' : ''}`} type="button" onClick={() => playTrack(position)} aria-label={`Play ${track.title || title(track.name)}`}>
             <span className="music-number">{(track.id ? activeID === track.id : index === position) && playing ? <span className="music-equalizer" aria-hidden="true"><i /><i /><i /></span> : rowNumber + 1}</span>
             <span className="music-track"><CoverArt track={track} folder={folder} /><span><strong>{track.title || title(track.name)}</strong><small>{track.artist || 'Unknown artist'} · {track.album || 'Unknown album'}{track.id && personal?.playCounts[track.id] ? ` · ${personal.playCounts[track.id]} plays` : ''}</small></span></span>
@@ -452,6 +484,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
             <span className="music-album">{track.album || 'Unknown album'}</span>
             <span className="music-duration">{track.duration > 0 ? time(track.duration) : '—'}</span>
           </button>
+          {catalogMode && track.id && <button type="button" className="music-delete-track" aria-label={`Delete ${track.title || title(track.name)} from disk`} title="Delete song from disk" disabled={deletingID === track.id} onClick={() => void deleteTrack(track)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v5m4-5v5" /></svg></button>}
         </li>)}
       </ol>
       {catalogMode && hasMore && <button type="button" className="music-load-more" onClick={() => void refreshCatalog(tracks.length)}>Load more songs</button>}
@@ -473,6 +506,6 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
       </div>
       <div className="music-player-actions">{catalogMode && <><button type="button" aria-label="Show queue" onClick={() => setShowQueue((value) => !value)}>≡</button>{active?.id && <button type="button" aria-label="Add current song to queue" onClick={() => void setQueue([...(personal?.queue ?? []), active.id!])}>+</button>}</>}<div className="music-volume"><button type="button" aria-label={volume === 0 ? 'Unmute' : 'Mute'} title={volume === 0 ? 'Unmute' : 'Mute'} onClick={() => changeVolume(volume === 0 ? lastVolume.current : 0)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9z" />{volume === 0 ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M16 8c2 1 3 2 3 4s-1 3-3 4" />}</svg></button><input type="range" aria-label="Volume" min="0" max="1" step="0.01" value={volume} onChange={(event) => changeVolume(Number(event.target.value))} style={{ '--volume': `${volume * 100}%` } as React.CSSProperties} /></div></div>
     </div>
-    <audio ref={audio} src={active ? active.id ? `/api/v1/music/audio?id=${encodeURIComponent(active.id)}` : `/api/v1/music/audio?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(active.name)}` : undefined} preload="metadata" onLoadedMetadata={(event) => { if (resumePosition > 0) { event.currentTarget.currentTime = Math.min(resumePosition, Math.max(0, event.currentTarget.duration - 1)); setResumePosition(0) } }} onTimeUpdate={(event) => { const position = event.currentTarget.currentTime; setCurrentTime(position); if (catalogMode && active?.id && Date.now() - lastPositionSave.current > 10000) { lastPositionSave.current = Date.now(); void savePlayer(active.id, position) } }} onDurationChange={(event) => setDuration(event.currentTarget.duration)} onPlay={(event) => { setPlaying(true); if (catalogMode && active?.id) void savePlayer(active.id, event.currentTarget.currentTime) }} onPause={(event) => { setPlaying(false); if (catalogMode && active?.id && event.currentTarget.currentSrc && new URL(event.currentTarget.currentSrc).searchParams.get('id') === active.id) void savePlayer(active.id, event.currentTarget.currentTime) }} onEnded={songEnded} onError={() => { if (active) setError('This track could not be loaded or played.') }} />
+    <audio ref={audio} src={active ? active.id ? `/api/v1/music/audio?id=${encodeURIComponent(active.id)}` : `/api/v1/music/audio?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(active.name)}` : undefined} preload="metadata" onLoadedMetadata={(event) => { if (resumePosition > 0) { event.currentTarget.currentTime = Math.min(resumePosition, Math.max(0, event.currentTarget.duration - 1)); setResumePosition(0) } }} onTimeUpdate={(event) => { const position = event.currentTarget.currentTime; setCurrentTime(position); if (catalogMode && active?.id && active.id !== deletedTrackID.current && Date.now() - lastPositionSave.current > 10000) { lastPositionSave.current = Date.now(); void savePlayer(active.id, position) } }} onDurationChange={(event) => setDuration(event.currentTarget.duration)} onPlay={(event) => { setPlaying(true); if (catalogMode && active?.id && active.id !== deletedTrackID.current) void savePlayer(active.id, event.currentTarget.currentTime) }} onPause={(event) => { setPlaying(false); if (catalogMode && active?.id && active.id !== deletedTrackID.current && event.currentTarget.currentSrc && new URL(event.currentTarget.currentSrc).searchParams.get('id') === active.id) void savePlayer(active.id, event.currentTarget.currentTime) }} onEnded={songEnded} onError={() => { if (active) setError('This track could not be loaded or played.') }} />
   </section>
 }

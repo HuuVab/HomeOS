@@ -89,6 +89,36 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 		}
 		writeJSON(w, 200, track)
 	})
+	mux.HandleFunc("DELETE /api/v1/music/tracks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r) {
+			return
+		}
+		if !db.IsPostgres() {
+			writeError(w, 400, "postgres_required", "Persistent music requires PostgreSQL")
+			return
+		}
+		track, err := approvedMusicTrack(r, db, r.PathValue("id"))
+		if err != nil {
+			writeError(w, 404, "track_not_found", "Track is unavailable")
+			return
+		}
+		library, err := db.MusicLibrary(r.Context())
+		if err != nil {
+			writeError(w, 500, "music_library", "Music library is unavailable")
+			return
+		}
+		if err := removeMusicTrackFile(library.Root, track.Path); err != nil {
+			writeError(w, 500, "music_delete", "Could not delete the audio file from disk: "+err.Error())
+			return
+		}
+		if err := db.MusicMarkDeleted(r.Context(), track.ID); err != nil {
+			wakeMusicScanner()
+			writeError(w, 500, "music_delete", "File deleted, but the library could not be updated: "+err.Error())
+			return
+		}
+		wakeMusicScanner()
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /api/v1/music/library", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r) {
 			return

@@ -224,6 +224,24 @@ func (s *Store) MusicMarkMissing(ctx context.Context, root string, stamp int64) 
 	return err
 }
 
+func (s *Store) MusicMarkDeleted(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE music.tracks SET available=false WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE music.player_state SET track_id=NULL,position_seconds=0 WHERE track_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM music.queue WHERE track_id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) MusicPlay(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO music.plays(track_id,played_at) SELECT id,$2 FROM music.tracks WHERE id=$1 AND available=true`, id, time.Now().Unix())
 	return err

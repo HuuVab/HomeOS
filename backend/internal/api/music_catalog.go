@@ -46,6 +46,30 @@ func approvedMusicTrack(r *http.Request, db *store.Store, id string) (store.Musi
 	return t, nil
 }
 
+func removeMusicTrackFile(libraryRoot, trackPath string) error {
+	resolvedRoot, err := filepath.EvalSymlinks(libraryRoot)
+	if err != nil {
+		return err
+	}
+	resolvedPath, err := filepath.EvalSymlinks(trackPath)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil {
+		return err
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("track is outside the music library")
+	}
+	root, err := os.OpenRoot(resolvedRoot)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.Remove(rel)
+}
+
 func musicRootAllowed(path string) bool {
 	configured := os.Getenv("HOMEOS_MUSIC_ALLOWED_ROOTS")
 	if configured == "" {
