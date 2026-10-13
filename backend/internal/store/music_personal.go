@@ -27,7 +27,7 @@ type MusicPersonal struct {
 	Player     MusicPlayerState `json:"player"`
 }
 
-const qualifiedMusicTrackColumns = `t.id,t.path,t.name,t.title,t.artist,t.album,t.duration,t.size,t.modified_at,t.has_cover,t.cover_stream,t.available`
+const qualifiedMusicTrackColumns = `t.id,t.path,t.name,t.title,t.artist,t.album,t.duration,t.size,t.modified_at,t.has_cover,t.cover_stream,t.available,t.loudness_lufs,t.loudness_peak_dbfs`
 
 func (s *Store) MusicCollectionTracks(ctx context.Context, collection, id string) ([]MusicTrack, error) {
 	statement := `SELECT ` + qualifiedMusicTrackColumns + ` FROM music.favorites f JOIN music.tracks t ON t.id=f.track_id WHERE t.available ORDER BY f.added_at DESC`

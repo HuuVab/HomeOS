@@ -34,6 +34,7 @@ func StartMusicScanner(ctx context.Context, db *store.Store) {
 	s := &MusicScanner{db: db, wake: make(chan struct{}, 1)}
 	activeMusicScanner = s
 	go s.run(ctx)
+	go runMusicLoudnessWorker(ctx, db)
 }
 
 func wakeMusicScanner() {

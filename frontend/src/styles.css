@@ -457,6 +457,8 @@ form > input { margin-bottom: 16px; }
 .music-player-actions { display: flex; align-items: center; justify-self: end; gap: 4px; }
 .music-player-actions > button { min-width: 28px; min-height: 28px; border: 0; background: transparent; color: #c4c7cc; font-size: 18px; }
 .music-player-actions > button:hover, .music-controls button[aria-pressed="true"] { color: #36b4ff; }
+.music-player-actions .music-auto-level { min-width: 38px; min-height: 26px; padding: 2px 5px; border-radius: 6px; color: #9fa4ad; font-size: 11px; font-weight: 650; }
+.music-player-actions .music-auto-level[aria-pressed="true"] { background: #17384f; color: #36b4ff; }
 .music-player-actions .music-volume { width: 120px; }
 .music-now > span:nth-child(2) { flex: 1 1 auto; display: grid; min-width: 0; }
 .music-player > *, .music-playback, .music-timeline { min-width: 0; }

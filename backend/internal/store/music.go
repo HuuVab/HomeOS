@@ -13,19 +13,21 @@ import (
 )
 
 type MusicTrack struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Path        string  `json:"path"`
-	Title       string  `json:"title"`
-	Artist      string  `json:"artist"`
-	Album       string  `json:"album"`
-	Duration    float64 `json:"duration"`
-	Size        int64   `json:"size"`
-	ModifiedAt  int64   `json:"modifiedAt"`
-	ContentHash string  `json:"-"`
-	HasCover    bool    `json:"hasCover"`
-	CoverStream int     `json:"-"`
-	Available   bool    `json:"available"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Path             string   `json:"path"`
+	Title            string   `json:"title"`
+	Artist           string   `json:"artist"`
+	Album            string   `json:"album"`
+	Duration         float64  `json:"duration"`
+	Size             int64    `json:"size"`
+	ModifiedAt       int64    `json:"modifiedAt"`
+	ContentHash      string   `json:"-"`
+	HasCover         bool     `json:"hasCover"`
+	CoverStream      int      `json:"-"`
+	Available        bool     `json:"available"`
+	LoudnessLUFS     *float64 `json:"loudnessLufs,omitempty"`
+	LoudnessPeakDBFS *float64 `json:"loudnessPeakDbfs,omitempty"`
 }
 
 type MusicLibrary struct {
@@ -103,13 +105,26 @@ func (s *Store) MusicDeactivateRoot(ctx context.Context, root string) error {
 	return err
 }
 
-func scanMusicTrack(rows *sql.Rows) (MusicTrack, error) {
+func scanMusicTrackFields(row interface{ Scan(...any) error }, hash *string) (MusicTrack, error) {
 	var t MusicTrack
-	err := rows.Scan(&t.ID, &t.Path, &t.Name, &t.Title, &t.Artist, &t.Album, &t.Duration, &t.Size, &t.ModifiedAt, &t.HasCover, &t.CoverStream, &t.Available)
+	var loudness, peak sql.NullFloat64
+	fields := []any{&t.ID, &t.Path, &t.Name, &t.Title, &t.Artist, &t.Album, &t.Duration, &t.Size, &t.ModifiedAt, &t.HasCover, &t.CoverStream, &t.Available, &loudness, &peak}
+	if hash != nil {
+		fields = append(fields, hash)
+	}
+	err := row.Scan(fields...)
+	if loudness.Valid {
+		t.LoudnessLUFS = &loudness.Float64
+	}
+	if peak.Valid {
+		t.LoudnessPeakDBFS = &peak.Float64
+	}
 	return t, err
 }
 
-const musicTrackColumns = `id,path,name,title,artist,album,duration,size,modified_at,has_cover,cover_stream,available`
+func scanMusicTrack(rows *sql.Rows) (MusicTrack, error) { return scanMusicTrackFields(rows, nil) }
+
+const musicTrackColumns = `id,path,name,title,artist,album,duration,size,modified_at,has_cover,cover_stream,available,loudness_lufs,loudness_peak_dbfs`
 
 func (s *Store) MusicTracks(ctx context.Context, root, query, artist, album, folder, sortKey string, descending bool, limit, offset int) ([]MusicTrack, error) {
 	if limit < 1 || limit > 500 {
@@ -144,15 +159,12 @@ func (s *Store) MusicTracks(ctx context.Context, root, query, artist, album, fol
 }
 
 func (s *Store) MusicTrackByID(ctx context.Context, id string) (MusicTrack, error) {
-	var t MusicTrack
-	err := s.db.QueryRowContext(ctx, `SELECT `+musicTrackColumns+` FROM music.tracks WHERE id=$1`, id).Scan(&t.ID, &t.Path, &t.Name, &t.Title, &t.Artist, &t.Album, &t.Duration, &t.Size, &t.ModifiedAt, &t.HasCover, &t.CoverStream, &t.Available)
-	return t, err
+	return scanMusicTrackFields(s.db.QueryRowContext(ctx, `SELECT `+musicTrackColumns+` FROM music.tracks WHERE id=$1`, id), nil)
 }
 
 func (s *Store) MusicTrackAtPath(ctx context.Context, path string) (MusicTrack, string, error) {
-	var t MusicTrack
 	var hash string
-	err := s.db.QueryRowContext(ctx, `SELECT `+musicTrackColumns+`,content_hash FROM music.tracks WHERE path=$1`, path).Scan(&t.ID, &t.Path, &t.Name, &t.Title, &t.Artist, &t.Album, &t.Duration, &t.Size, &t.ModifiedAt, &t.HasCover, &t.CoverStream, &t.Available, &hash)
+	t, err := scanMusicTrackFields(s.db.QueryRowContext(ctx, `SELECT `+musicTrackColumns+`,content_hash FROM music.tracks WHERE path=$1`, path), &hash)
 	return t, hash, err
 }
 
@@ -179,7 +191,7 @@ func (s *Store) UpsertMusicTrack(ctx context.Context, t MusicTrack, stamp int64)
 		}
 		albumID = id
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO music.tracks(id,path,name,title,artist,album,artist_id,album_id,duration,size,modified_at,content_hash,has_cover,cover_stream,available,seen_scan,indexed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,true,$15,$16) ON CONFLICT(id) DO UPDATE SET path=EXCLUDED.path,name=EXCLUDED.name,title=EXCLUDED.title,artist=EXCLUDED.artist,album=EXCLUDED.album,artist_id=EXCLUDED.artist_id,album_id=EXCLUDED.album_id,duration=EXCLUDED.duration,size=EXCLUDED.size,modified_at=EXCLUDED.modified_at,content_hash=EXCLUDED.content_hash,has_cover=EXCLUDED.has_cover,cover_stream=EXCLUDED.cover_stream,available=true,seen_scan=EXCLUDED.seen_scan,indexed_at=EXCLUDED.indexed_at`, t.ID, t.Path, t.Name, t.Title, t.Artist, t.Album, artistID, albumID, t.Duration, t.Size, t.ModifiedAt, t.ContentHash, t.HasCover, t.CoverStream, stamp, time.Now().Unix())
+	_, err = tx.ExecContext(ctx, `INSERT INTO music.tracks(id,path,name,title,artist,album,artist_id,album_id,duration,size,modified_at,content_hash,has_cover,cover_stream,available,seen_scan,indexed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,true,$15,$16) ON CONFLICT(id) DO UPDATE SET path=EXCLUDED.path,name=EXCLUDED.name,title=EXCLUDED.title,artist=EXCLUDED.artist,album=EXCLUDED.album,artist_id=EXCLUDED.artist_id,album_id=EXCLUDED.album_id,duration=EXCLUDED.duration,size=EXCLUDED.size,modified_at=EXCLUDED.modified_at,content_hash=EXCLUDED.content_hash,has_cover=EXCLUDED.has_cover,cover_stream=EXCLUDED.cover_stream,available=true,seen_scan=EXCLUDED.seen_scan,indexed_at=EXCLUDED.indexed_at,loudness_lufs=CASE WHEN music.tracks.content_hash=EXCLUDED.content_hash THEN music.tracks.loudness_lufs ELSE NULL END,loudness_peak_dbfs=CASE WHEN music.tracks.content_hash=EXCLUDED.content_hash THEN music.tracks.loudness_peak_dbfs ELSE NULL END,loudness_checked_at=CASE WHEN music.tracks.content_hash=EXCLUDED.content_hash THEN music.tracks.loudness_checked_at ELSE 0 END`, t.ID, t.Path, t.Name, t.Title, t.Artist, t.Album, artistID, albumID, t.Duration, t.Size, t.ModifiedAt, t.ContentHash, t.HasCover, t.CoverStream, stamp, time.Now().Unix())
 	if err != nil {
 		return err
 	}
@@ -216,6 +228,17 @@ func (s *Store) MusicMatchHash(ctx context.Context, hash, root string, stamp int
 
 func (s *Store) MusicMarkSeen(ctx context.Context, id string, stamp int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE music.tracks SET seen_scan=$2,available=true WHERE id=$1`, id, stamp)
+	return err
+}
+
+func (s *Store) MusicNextUnmeasuredTrack(ctx context.Context, root string) (MusicTrack, error) {
+	var t MusicTrack
+	err := s.db.QueryRowContext(ctx, `SELECT id,path,size,modified_at FROM music.tracks WHERE available AND loudness_checked_at=0 AND $1<>'' AND left(path,length($1))=$1 ORDER BY (id=(SELECT track_id FROM music.player_state WHERE id=1)) DESC,indexed_at DESC LIMIT 1`, musicPathPrefix(root)).Scan(&t.ID, &t.Path, &t.Size, &t.ModifiedAt)
+	return t, err
+}
+
+func (s *Store) MusicSetLoudness(ctx context.Context, t MusicTrack, loudness, peak *float64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE music.tracks SET loudness_lufs=$1,loudness_peak_dbfs=$2,loudness_checked_at=$3 WHERE id=$4 AND path=$5 AND size=$6 AND modified_at=$7 AND available`, loudness, peak, time.Now().Unix(), t.ID, t.Path, t.Size, t.ModifiedAt)
 	return err
 }
 

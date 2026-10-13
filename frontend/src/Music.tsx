@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
-type Track = { id?: string; name: string; path?: string; title: string; artist: string; album: string; duration: number; size: number; hasCover: boolean; available?: boolean }
+type Track = { id?: string; name: string; path?: string; title: string; artist: string; album: string; duration: number; size: number; hasCover: boolean; available?: boolean; loudnessLufs?: number; loudnessPeakDbfs?: number }
 type FolderListing = { path: string; parent: string; folders: { name: string; path: string }[] }
 type SortKey = 'title' | 'artist' | 'duration'
 type Playlist = { id: string; name: string; trackIds: string[] }
@@ -29,6 +29,12 @@ function shuffledKeys(keys: string[]) {
     ;[result[index], result[other]] = [result[other], result[index]]
   }
   return result
+}
+
+function normalizationFactor(track: Track | undefined, enabled: boolean, catalog: boolean) {
+  if (!enabled || !catalog || !Number.isFinite(track?.loudnessLufs)) return 1
+  const delta = Math.max(-18, Math.min(12, -16 - track!.loudnessLufs!))
+  return 10 ** (delta / 20)
 }
 
 function title(name: string) { return name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') }
@@ -73,6 +79,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(0.8)
+  const [autoLevel, setAutoLevel] = useState(() => localStorage.getItem('homeos.music.autoLevel') !== 'off')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [deletingID, setDeletingID] = useState('')
@@ -81,6 +88,9 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   const [browserError, setBrowserError] = useState('')
   const [browserListing, setBrowserListing] = useState<FolderListing | null>(null)
   const audio = useRef<HTMLAudioElement>(null)
+  const audioContext = useRef<AudioContext | null>(null)
+  const normalizationGain = useRef<GainNode | null>(null)
+  const masterGain = useRef<GainNode | null>(null)
   const lastVolume = useRef(0.8)
   const loadRequest = useRef(0)
   const lastPositionSave = useRef(0)
@@ -102,7 +112,38 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
     return (sortDescending ? -comparison : comparison) || left.position - right.position
   })
 
-  useEffect(() => { if (audio.current) audio.current.volume = volume }, [])
+  useEffect(() => () => { void audioContext.current?.close() }, [])
+  useEffect(() => {
+    const gain = normalizationGain.current?.gain
+    const context = audioContext.current
+    if (!gain || !context) return
+    gain.setTargetAtTime(normalizationFactor(active, autoLevel, catalogMode), context.currentTime, 0.15)
+  }, [active?.id, active?.loudnessLufs, autoLevel, catalogMode])
+
+  function ensureAudioGraph() {
+    if (audioContext.current) { void audioContext.current.resume(); return }
+    if (!audio.current || !window.AudioContext) { if (audio.current) audio.current.volume = volume; return }
+    try {
+      const context = new AudioContext()
+      const source = context.createMediaElementSource(audio.current)
+      const gain = context.createGain()
+      const compressor = context.createDynamicsCompressor()
+      const master = context.createGain()
+      compressor.threshold.value = -3
+      compressor.knee.value = 6
+      compressor.ratio.value = 12
+      compressor.attack.value = 0.003
+      compressor.release.value = 0.25
+      gain.gain.value = normalizationFactor(active, autoLevel, catalogMode)
+      source.connect(gain).connect(compressor).connect(master).connect(context.destination)
+      master.gain.value = volume
+      audio.current.volume = 1
+      audioContext.current = context
+      normalizationGain.current = gain
+      masterGain.current = master
+      void context.resume()
+    } catch { if (audio.current) audio.current.volume = volume }
+  }
   useEffect(() => {
     void (async () => {
       try {
@@ -261,7 +302,8 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   function changeVolume(next: number) {
     setVolume(next)
     if (next > 0) lastVolume.current = next
-    if (audio.current) audio.current.volume = next
+    if (masterGain.current) masterGain.current.gain.value = next
+    else if (audio.current) audio.current.volume = next
   }
 
   async function loadFolder(next: string) {
@@ -352,6 +394,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
 
   function playTrack(next: number, remember = true) {
     if (next < 0 || next >= tracks.length) return
+    ensureAudioGraph()
     if (tracks[next].id ? tracks[next].id === activeID : next === index) {
       if (audio.current?.paused) void audio.current.play().catch(() => setError('This audio format could not be played.'))
       return
@@ -378,6 +421,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   }, [playNonce])
 
   function skip(direction: number) {
+    ensureAudioGraph()
     if (direction > 0 && personal?.queue.length) {
       const nextID = personal.queue[0]
       const queued = tracks.findIndex((track) => track.id === nextID)
@@ -498,13 +542,13 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
         <div className="music-controls">
           {catalogMode && <button type="button" className="music-shuffle-button" aria-label="Shuffle" title={personal?.player.shuffle ? 'Shuffle on' : 'Shuffle off'} aria-pressed={personal?.player.shuffle ?? false} disabled={!personal} onClick={() => void toggleMode('shuffle')}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3c4 0 6 10 10 10h3m-3-3 3 3-3 3M4 17h3c1.5 0 2.7-1.3 3.8-3M14 10c1-1.8 2-3 3-3h3m-3-3 3 3-3 3" /></svg><span>Shuffle</span></button>}
           <button type="button" aria-label="Previous track" onClick={() => skip(-1)} disabled={!visibleTracks.length}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M19 5 7 12l12 7z" /></svg></button>
-          <button type="button" className="music-play-button" aria-label={playing ? 'Pause' : 'Play'} onClick={() => { if (!active && visibleTracks.length) { if (personal?.player.shuffle) skip(1); else playTrack(visibleTracks[0].position) } else if (playing) audio.current?.pause(); else void audio.current?.play().catch(() => setError('This audio format could not be played.')) }} disabled={!active && !visibleTracks.length}>{playing ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M17 5v14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z" /></svg>}</button>
+          <button type="button" className="music-play-button" aria-label={playing ? 'Pause' : 'Play'} onClick={() => { if (!active && visibleTracks.length) { if (personal?.player.shuffle) skip(1); else playTrack(visibleTracks[0].position) } else if (playing) audio.current?.pause(); else { ensureAudioGraph(); void audio.current?.play().catch(() => setError('This audio format could not be played.')) } }} disabled={!active && !visibleTracks.length}>{playing ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M17 5v14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z" /></svg>}</button>
           <button type="button" aria-label="Next track" onClick={() => skip(1)} disabled={!visibleTracks.length && !personal?.queue.length}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M5 5l12 7-12 7z" /></svg></button>
           {catalogMode && <button type="button" aria-label={`Repeat ${personal?.player.repeat ?? 'off'}`} aria-pressed={personal ? personal.player.repeat !== 'off' : false} onClick={() => void toggleMode('repeat')}>↻{personal?.player.repeat === 'one' ? '₁' : ''}</button>}
         </div>
         <div className="music-timeline"><span>{time(currentTime)}</span><input type="range" aria-label="Seek" min="0" max={duration || 1} step="0.1" value={Math.min(currentTime, duration || 1)} disabled={!active || !duration} onChange={(event) => { if (audio.current) audio.current.currentTime = Number(event.target.value); setCurrentTime(Number(event.target.value)) }} style={{ '--progress': `${duration ? currentTime / duration * 100 : 0}%` } as React.CSSProperties} /><span>{time(duration)}</span></div>
       </div>
-      <div className="music-player-actions">{catalogMode && <><button type="button" aria-label="Show queue" onClick={() => setShowQueue((value) => !value)}>≡</button>{active?.id && <button type="button" aria-label="Add current song to queue" onClick={() => void setQueue([...(personal?.queue ?? []), active.id!])}>+</button>}</>}<div className="music-volume"><button type="button" aria-label={volume === 0 ? 'Unmute' : 'Mute'} title={volume === 0 ? 'Unmute' : 'Mute'} onClick={() => changeVolume(volume === 0 ? lastVolume.current : 0)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9z" />{volume === 0 ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M16 8c2 1 3 2 3 4s-1 3-3 4" />}</svg></button><input type="range" aria-label="Volume" min="0" max="1" step="0.01" value={volume} onChange={(event) => changeVolume(Number(event.target.value))} style={{ '--volume': `${volume * 100}%` } as React.CSSProperties} /></div></div>
+      <div className="music-player-actions">{catalogMode && <><button type="button" aria-label="Show queue" onClick={() => setShowQueue((value) => !value)}>≡</button>{active?.id && <button type="button" aria-label="Add current song to queue" onClick={() => void setQueue([...(personal?.queue ?? []), active.id!])}>+</button>}<button type="button" className="music-auto-level" aria-label="Auto level" aria-pressed={autoLevel} title={autoLevel ? active?.id && active.loudnessLufs == null ? 'Auto level on; measuring this song in the background' : 'Auto level on' : 'Auto level off'} onClick={() => { setAutoLevel((current) => { localStorage.setItem('homeos.music.autoLevel', current ? 'off' : 'on'); return !current }) }}>Auto</button></>}<div className="music-volume"><button type="button" aria-label={volume === 0 ? 'Unmute' : 'Mute'} title={volume === 0 ? 'Unmute' : 'Mute'} onClick={() => changeVolume(volume === 0 ? lastVolume.current : 0)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9z" />{volume === 0 ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M16 8c2 1 3 2 3 4s-1 3-3 4" />}</svg></button><input type="range" aria-label="Volume" min="0" max="1" step="0.01" value={volume} onChange={(event) => changeVolume(Number(event.target.value))} style={{ '--volume': `${volume * 100}%` } as React.CSSProperties} /></div></div>
     </div>
     <audio ref={audio} src={active ? active.id ? `/api/v1/music/audio?id=${encodeURIComponent(active.id)}` : `/api/v1/music/audio?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(active.name)}` : undefined} preload="metadata" onLoadedMetadata={(event) => { if (resumePosition > 0) { event.currentTarget.currentTime = Math.min(resumePosition, Math.max(0, event.currentTarget.duration - 1)); setResumePosition(0) } }} onTimeUpdate={(event) => { const position = event.currentTarget.currentTime; setCurrentTime(position); if (catalogMode && active?.id && active.id !== deletedTrackID.current && Date.now() - lastPositionSave.current > 10000) { lastPositionSave.current = Date.now(); void savePlayer(active.id, position) } }} onDurationChange={(event) => setDuration(event.currentTarget.duration)} onPlay={(event) => { setPlaying(true); if (catalogMode && active?.id && active.id !== deletedTrackID.current) void savePlayer(active.id, event.currentTarget.currentTime) }} onPause={(event) => { setPlaying(false); if (catalogMode && active?.id && active.id !== deletedTrackID.current && event.currentTarget.currentSrc && new URL(event.currentTarget.currentSrc).searchParams.get('id') === active.id) void savePlayer(active.id, event.currentTarget.currentTime) }} onEnded={songEnded} onError={() => { if (active) setError('This track could not be loaded or played.') }} />
   </section>
