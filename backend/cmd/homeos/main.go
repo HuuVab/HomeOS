@@ -533,6 +533,7 @@ func main() {
 		}
 		defer closeMetadata()
 	}
+	api.StartMusicScanner(context.Background(), db)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           api.NewHandlerWithRedis(os.Getenv("HOMEOS_WEB_DIR"), db, monitor.NewCollector(dataDir), files, accelerator, metadataClient),

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
-type Track = { name: string; title: string; artist: string; album: string; duration: number; size: number; hasCover: boolean }
+type Track = { id?: string; name: string; path?: string; title: string; artist: string; album: string; duration: number; size: number; hasCover: boolean; available?: boolean }
 type FolderListing = { path: string; parent: string; folders: { name: string; path: string }[] }
 type SortKey = 'title' | 'artist' | 'duration'
+type Playlist = { id: string; name: string; trackIds: string[] }
+type Personal = { favorites: string[]; recent: Track[]; playCounts: Record<string, number>; playlists: Playlist[]; queue: string[]; player: { trackId: string; position: number; shuffle: boolean; repeat: 'off' | 'all' | 'one' } }
 
 const songCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
@@ -13,14 +15,30 @@ function time(value: number) {
 }
 
 function CoverArt({ track, folder, large = false }: { track?: Track; folder: string; large?: boolean }) {
-  const source = track?.hasCover ? `/api/v1/music/cover?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(track.name)}` : ''
+  const source = track?.id ? `/api/v1/music/cover?id=${encodeURIComponent(track.id)}` : track?.hasCover ? `/api/v1/music/cover?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(track.name)}` : ''
   return <span className="music-art" aria-hidden="true">♫{source && <img key={source} src={source} alt="" loading={large ? 'eager' : 'lazy'} onError={(event) => { event.currentTarget.hidden = true }} />}</span>
 }
 
-export default function Music() {
+export default function Music({ csrfToken }: { csrfToken: string }) {
   const [path, setPath] = useState(() => localStorage.getItem('homeos.music.path') ?? '')
   const [folder, setFolder] = useState('')
   const [tracks, setTracks] = useState<Track[]>([])
+  const [catalogMode, setCatalogMode] = useState(false)
+  const [activeID, setActiveID] = useState('')
+  const [activeSnapshot, setActiveSnapshot] = useState<Track | undefined>()
+  const [hasMore, setHasMore] = useState(false)
+  const [scanError, setScanError] = useState('')
+  const [personal, setPersonal] = useState<Personal | null>(null)
+  const [collection, setCollection] = useState('library')
+  const [playlistName, setPlaylistName] = useState('')
+  const [showPlaylists, setShowPlaylists] = useState(false)
+  const [showQueue, setShowQueue] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
+  const [artistFilter, setArtistFilter] = useState('')
+  const [albumFilter, setAlbumFilter] = useState('')
+  const [folderFilter, setFolderFilter] = useState('')
+  const [playNonce, setPlayNonce] = useState(0)
+  const [resumePosition, setResumePosition] = useState(0)
   const [query, setQuery] = useState('')
   const [sortBy, setSortBy] = useState<SortKey | null>(null)
   const [sortDescending, setSortDescending] = useState(false)
@@ -39,7 +57,9 @@ export default function Music() {
   const audio = useRef<HTMLAudioElement>(null)
   const lastVolume = useRef(0.8)
   const loadRequest = useRef(0)
-  const active = tracks[index]
+  const lastPositionSave = useRef(0)
+  const catalogQuery = useRef('')
+  const active = tracks.find((track) => track.id && track.id === activeID) ?? activeSnapshot
   const search = query.trim().toLocaleLowerCase()
   const visibleTracks = tracks.map((track, position) => ({ track, position })).filter(({ track }) =>
     [track.title, track.artist, track.album].some((value) => value.toLocaleLowerCase().includes(search)))
@@ -54,9 +74,121 @@ export default function Music() {
 
   useEffect(() => { if (audio.current) audio.current.volume = volume }, [])
   useEffect(() => {
-    const saved = localStorage.getItem('homeos.music.path')
-    if (saved) void loadFolder(saved)
+    void (async () => {
+      try {
+        const response = await fetch('/api/v1/music/library')
+        if (!response.ok) throw new Error('Could not load music library')
+        const library = await response.json() as { root: string }
+        if (library.root) { setCatalogMode(true); setFolder(library.root); setPath(library.root); setShowFolderPicker(false); return }
+      } catch { /* SQLite installations still use the original folder API. */ }
+      const saved = localStorage.getItem('homeos.music.path')
+      if (saved) void loadFolder(saved)
+    })()
   }, [])
+
+  useEffect(() => { if (catalogMode) void loadPersonal() }, [catalogMode])
+
+  async function loadPersonal(restore = true) {
+    const response = await fetch('/api/v1/music/personal')
+    if (!response.ok) return
+    const data = await response.json() as Personal
+    setPersonal(data)
+    if (restore && data.player.trackId) {
+      const trackResponse = await fetch(`/api/v1/music/tracks/${encodeURIComponent(data.player.trackId)}`)
+      if (trackResponse.ok) {
+        setActiveSnapshot(await trackResponse.json() as Track)
+        setActiveID(data.player.trackId)
+        setResumePosition(data.player.position)
+      }
+    }
+  }
+
+  async function postPersonal(endpoint: string, body: object) {
+    const response = await fetch(`/api/v1/music/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify(body) })
+    if (!response.ok) { const data = await response.json().catch(() => null); setError(data?.error?.message ?? 'Could not save music changes'); return false }
+    return true
+  }
+
+  async function savePlayer(trackID = activeID, position = currentTime, nextPersonal = personal) {
+    if (!catalogMode || !nextPersonal) return
+    await postPersonal('player', { trackId: trackID, position, shuffle: nextPersonal.player.shuffle, repeat: nextPersonal.player.repeat })
+  }
+
+  async function toggleFavorite(track: Track) {
+    if (!track.id || !personal) return
+    const liked = !personal.favorites.includes(track.id)
+    if (await postPersonal('favorite', { id: track.id, liked })) void loadPersonal(false)
+  }
+
+  async function createPlaylist() {
+    if (!playlistName.trim()) return
+    if (await postPersonal('playlists', { name: playlistName.trim() })) { setPlaylistName(''); void loadPersonal(false) }
+  }
+
+  async function addToPlaylist(playlist: Playlist, track: Track) {
+    if (!track.id) return
+    const ids = playlist.trackIds.includes(track.id) ? playlist.trackIds.filter((id) => id !== track.id) : [...playlist.trackIds, track.id]
+    const response = await fetch(`/api/v1/music/playlists/${playlist.id}/tracks`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify({ trackIds: ids }) })
+    if (response.ok) { void loadPersonal(false); if (collection === playlist.id) void refreshCatalog() }
+    else setError('Could not update playlist')
+  }
+
+  async function reorderPlaylist(playlist: Playlist, position: number, direction: number) {
+    const next = [...playlist.trackIds]
+    const target = position + direction
+    if (target < 0 || target >= next.length) return
+    ;[next[position], next[target]] = [next[target], next[position]]
+    const response = await fetch(`/api/v1/music/playlists/${playlist.id}/tracks`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify({ trackIds: next }) })
+    if (response.ok) { void loadPersonal(false); if (collection === playlist.id) void refreshCatalog() }
+    else setError('Could not reorder playlist')
+  }
+
+  async function deletePlaylist(playlist: Playlist) {
+    const response = await fetch(`/api/v1/music/playlists/${playlist.id}`, { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken } })
+    if (response.ok) { if (collection === playlist.id) setCollection('library'); void loadPersonal(false) }
+    else setError('Could not delete playlist')
+  }
+
+  async function setQueue(ids: string[]) {
+    if (await postPersonal('queue', { trackIds: ids })) setPersonal((current) => current ? { ...current, queue: ids } : current)
+  }
+
+  useEffect(() => {
+    if (!catalogMode || !folder) return
+    const timer = window.setTimeout(() => void refreshCatalog(), 250)
+    const interval = window.setInterval(() => void refreshCatalog(), 15000)
+    return () => { window.clearTimeout(timer); window.clearInterval(interval) }
+  }, [catalogMode, folder, query, sortBy, sortDescending, collection, personal?.recent, artistFilter, albumFilter, folderFilter])
+
+  async function refreshCatalog(offset = 0) {
+    if (collection !== 'library') {
+      catalogQuery.current = ''
+      if (collection === 'recent') { const seen = new Set<string>(); setTracks(personal?.recent.filter((track) => { if (!track.available || !track.id || seen.has(track.id)) return false; seen.add(track.id); return true }) ?? []); setHasMore(false); return }
+      const endpoint = collection === 'favorites' ? '/api/v1/music/favorites' : `/api/v1/music/playlists/${encodeURIComponent(collection)}/tracks`
+      const response = await fetch(endpoint)
+      if (response.ok) { const data = await response.json() as { tracks: Track[] }; setTracks(data.tracks); setHasMore(false) }
+      return
+    }
+    const params = new URLSearchParams({ limit: '500', offset: String(offset) })
+    if (query.trim()) params.set('q', query.trim())
+    if (artistFilter.trim()) params.set('artist', artistFilter.trim())
+    if (albumFilter.trim()) params.set('album', albumFilter.trim())
+    if (folderFilter.trim()) params.set('folder', folderFilter.trim())
+    if (sortBy) { params.set('sort', sortBy); params.set('order', sortDescending ? 'desc' : 'asc') }
+    const key = `${query}|${artistFilter}|${albumFilter}|${folderFilter}|${sortBy}|${sortDescending}`
+    const changed = catalogQuery.current !== key
+    catalogQuery.current = key
+    const response = await fetch(`/api/v1/music?${params}`)
+    if (!response.ok) { setError('Could not refresh music library'); return }
+    const data = await response.json() as { tracks: Track[]; scanError?: string }
+    setTracks((previous) => {
+      if (changed || previous.length <= 500) return offset ? [...previous, ...data.tracks] : data.tracks
+      const seen = new Set(data.tracks.map((track) => track.id ?? track.path ?? track.name))
+      return offset ? [...previous, ...data.tracks.filter((track) => !previous.some((item) => item.id === track.id))] : [...data.tracks, ...previous.filter((track) => !seen.has(track.id ?? track.path ?? track.name))]
+    })
+    setHasMore(data.tracks.length === 500)
+    setScanError(data.scanError ?? '')
+  }
 
   function changeVolume(next: number) {
     setVolume(next)
@@ -65,6 +197,24 @@ export default function Music() {
   }
 
   async function loadFolder(next: string) {
+    if (!next) return
+    try {
+      const response = await fetch('/api/v1/music/library', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify({ root: next }) })
+      if (response.ok) {
+        const data = await response.json() as { root: string }
+        audio.current?.pause(); setPlaying(false); setActiveID(''); setActiveSnapshot(undefined); setIndex(-1)
+        setCatalogMode(true); setFolder(data.root); setPath(data.root); setTracks([]); setShowFolderPicker(false); setBrowserOpen(false); setError('')
+        setCollection('library'); void loadPersonal(false)
+        localStorage.setItem('homeos.music.path', data.root)
+        return
+      }
+      const body = await response.json().catch(() => null)
+      if (body?.error?.code !== 'postgres_required') throw new Error(body?.error?.message ?? 'Could not set music folder')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not set music folder'); setShowFolderPicker(true); return }
+    await loadLegacyFolder(next)
+  }
+
+  async function loadLegacyFolder(next: string) {
     if (!next) return
     const request = ++loadRequest.current
     setLoading(true)
@@ -80,9 +230,12 @@ export default function Music() {
       audio.current?.pause()
       setPlaying(false)
       setIndex(-1)
+      setActiveID('')
+      setActiveSnapshot(undefined)
       setCurrentTime(0)
       setDuration(0)
       setTracks(data.tracks)
+      setCatalogMode(false)
       setFolder(next)
       setPath(next)
       setBrowserOpen(false)
@@ -119,26 +272,59 @@ export default function Music() {
 
   function playTrack(next: number) {
     if (next < 0 || next >= tracks.length) return
-    if (next === index) {
+    if (tracks[next].id ? tracks[next].id === activeID : next === index) {
       if (audio.current?.paused) void audio.current.play().catch(() => setError('This audio format could not be played.'))
       return
     }
     setError('')
     setIndex(next)
+    setActiveID(tracks[next].id ?? '')
+    setActiveSnapshot(tracks[next])
+    setResumePosition(0)
+    setPlayNonce((value) => value + 1)
+    if (tracks[next].id) void postPersonal('play', { id: tracks[next].id }).then(() => loadPersonal(false))
     setCurrentTime(0)
     setDuration(0)
   }
 
   useEffect(() => {
-    if (index < 0) return
+    if (playNonce === 0) return
     void audio.current?.play().catch(() => setError('This audio format could not be played.'))
-  }, [index, folder])
+  }, [playNonce])
 
   function skip(direction: number) {
+    if (direction > 0 && personal?.queue.length) {
+      const nextID = personal.queue[0]
+      const queued = tracks.findIndex((track) => track.id === nextID)
+      void setQueue(personal.queue.slice(1))
+      if (queued >= 0) { playTrack(queued); return }
+      void fetch(`/api/v1/music/tracks/${encodeURIComponent(nextID)}`).then(async (response) => {
+        if (!response.ok) { setError('Queued song is unavailable'); return }
+        const track = await response.json() as Track
+        setActiveSnapshot(track); setActiveID(nextID); setIndex(-1); setResumePosition(0); setPlayNonce((value) => value + 1)
+        void postPersonal('play', { id: nextID }).then(() => loadPersonal(false))
+      })
+      return
+    }
     if (!visibleTracks.length) return
-    const current = visibleTracks.findIndex((item) => item.position === index)
-    const next = current < 0 ? 0 : (current + direction + visibleTracks.length) % visibleTracks.length
+    const current = visibleTracks.findIndex((item) => item.track.id ? item.track.id === activeID : item.position === index)
+    const next = direction > 0 && personal?.player.shuffle && visibleTracks.length > 1 ? (current + 1 + Math.floor(Math.random() * (visibleTracks.length - 1))) % visibleTracks.length : current < 0 ? 0 : (current + direction + visibleTracks.length) % visibleTracks.length
     playTrack(visibleTracks[next].position)
+  }
+
+  function songEnded() {
+    if (personal?.player.repeat === 'one' && audio.current) { audio.current.currentTime = 0; void audio.current.play(); return }
+    const current = visibleTracks.findIndex((item) => item.track.id ? item.track.id === activeID : item.position === index)
+    if (personal?.player.repeat === 'off' && current === visibleTracks.length - 1 && !personal.queue.length) return
+    skip(1)
+  }
+
+  async function toggleMode(mode: 'shuffle' | 'repeat') {
+    if (!personal) return
+    const player = { ...personal.player, shuffle: mode === 'shuffle' ? !personal.player.shuffle : personal.player.shuffle, repeat: mode === 'repeat' ? personal.player.repeat === 'off' ? 'all' as const : personal.player.repeat === 'all' ? 'one' as const : 'off' as const : personal.player.repeat }
+    const next = { ...personal, player }
+    setPersonal(next)
+    await savePlayer(activeID, currentTime, next)
   }
 
   return <section className="music" aria-label="HomeMusic player">
@@ -163,33 +349,44 @@ export default function Music() {
         </div>
       </div>}
       {error && <p className="music-error" role="alert">{error}</p>}
+      {scanError && <p className="music-error" role="status">Library scan: {scanError}</p>}
       {folder && <div className="music-search"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, artist, or album" aria-label="Search songs by title, artist, or album" /></div>}
-      <div className={`music-heading ${showFolderPicker ? '' : 'is-compact'}`}><div><p className="eyebrow">Your library</p><h2>{folder ? 'Music' : loading ? 'Loading music…' : 'Choose a folder'}</h2></div><div className="music-heading-actions"><span>{tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}</span>{folder && <button type="button" className="secondary-button" onClick={() => setShowFolderPicker((current) => !current)}>{showFolderPicker ? 'Hide folder controls' : 'Change folder'}</button>}</div></div>
+      <div className={`music-heading ${showFolderPicker ? '' : 'is-compact'}`}>
+        <div><p className="eyebrow">Your library</p><h2>{folder ? collection === 'library' ? 'Music' : collection === 'favorites' ? 'Liked songs' : collection === 'recent' ? 'Recently played' : personal?.playlists.find((item) => item.id === collection)?.name ?? 'Playlist' : loading ? 'Loading music…' : 'Choose a folder'}</h2></div>
+        <div className="music-heading-actions"><span>{tracks.length}{hasMore ? '+' : ''} {tracks.length === 1 ? 'track' : 'tracks'}</span>{catalogMode && <><button type="button" onClick={() => setCollection('library')}>All songs</button><button type="button" onClick={() => setCollection('favorites')}>Liked</button><button type="button" onClick={() => setCollection('recent')}>Recent</button><button type="button" onClick={() => setShowPlaylists((value) => !value)}>Playlists</button><button type="button" onClick={() => setShowFilters((value) => !value)}>Filters</button></>}{folder && <button type="button" className="secondary-button" onClick={() => setShowFolderPicker((current) => !current)}>{showFolderPicker ? 'Hide folder controls' : 'Change folder'}</button>}</div>
+      </div>
       {folder && <p className="music-path" title={folder}>{folder}</p>}
+      {catalogMode && showFilters && <div className="music-filters"><input aria-label="Filter by artist" placeholder="Artist" value={artistFilter} onChange={(event) => setArtistFilter(event.target.value)} /><input aria-label="Filter by album" placeholder="Album" value={albumFilter} onChange={(event) => setAlbumFilter(event.target.value)} /><input aria-label="Filter by folder" placeholder="Folder path" value={folderFilter} onChange={(event) => setFolderFilter(event.target.value)} /></div>}
+      {catalogMode && showPlaylists && <div className="music-playlists">
+        <div className="music-playlist-create"><input aria-label="New playlist name" value={playlistName} onChange={(event) => setPlaylistName(event.target.value)} placeholder="New playlist name" /><button type="button" onClick={() => void createPlaylist()}>Create playlist</button></div>
+        {personal?.playlists.map((playlist) => <div key={playlist.id}><div className="music-playlist-item"><button type="button" onClick={() => { setSortBy(null); setCollection(playlist.id) }}>{playlist.name} <small>{playlist.trackIds.length} songs</small></button>{active?.id && <button type="button" onClick={() => void addToPlaylist(playlist, active)}>{playlist.trackIds.includes(active.id) ? 'Remove current' : 'Add current'}</button>}<button type="button" aria-label={`Delete ${playlist.name}`} onClick={() => void deletePlaylist(playlist)}>✕</button></div>{collection === playlist.id && playlist.trackIds.map((id, position) => <div className="music-playlist-item music-playlist-order" key={id}><span>{position + 1}. {tracks.find((track) => track.id === id)?.title ?? id}</span><button type="button" aria-label="Move song up" disabled={position === 0} onClick={() => void reorderPlaylist(playlist, position, -1)}>↑</button><button type="button" aria-label="Move song down" disabled={position === playlist.trackIds.length - 1} onClick={() => void reorderPlaylist(playlist, position, 1)}>↓</button></div>)}</div>)}
+      </div>}
+      {catalogMode && showQueue && <div className="music-playlists"><strong>Up next</strong>{personal?.queue.map((id, position) => <div className="music-playlist-item" key={`${id}-${position}`}><span>{tracks.find((track) => track.id === id)?.title ?? id}</span><button type="button" aria-label="Move queued song up" disabled={position === 0} onClick={() => { const next = [...personal.queue]; [next[position - 1], next[position]] = [next[position], next[position - 1]]; void setQueue(next) }}>↑</button><button type="button" aria-label="Move queued song down" disabled={position === personal.queue.length - 1} onClick={() => { const next = [...personal.queue]; [next[position + 1], next[position]] = [next[position], next[position + 1]]; void setQueue(next) }}>↓</button><button type="button" onClick={() => void setQueue(personal.queue.filter((_, index) => index !== position))}>Remove</button></div>)}{!personal?.queue.length && <small>Queue is empty.</small>}</div>}
       <div className="music-table-head"><span>#</span><button type="button" className="music-sort-button" onClick={() => changeSort('title')} aria-label={`Sort by title${sortBy === 'title' ? `, ${sortDescending ? 'descending' : 'ascending'}` : ''}`}>Title {sortBy === 'title' && (sortDescending ? '↓' : '↑')}</button><button type="button" className="music-sort-button" onClick={() => changeSort('artist')} aria-label={`Sort by artist${sortBy === 'artist' ? `, ${sortDescending ? 'descending' : 'ascending'}` : ''}`}>Artist {sortBy === 'artist' && (sortDescending ? '↓' : '↑')}</button><span>Album</span><button type="button" className="music-sort-button music-sort-duration" onClick={() => changeSort('duration')} aria-label={`Sort by duration${sortBy === 'duration' ? `, ${sortDescending ? 'descending' : 'ascending'}` : ''}`}>◷ {sortBy === 'duration' && (sortDescending ? '↓' : '↑')}</button></div>
       <ol className="music-list">
-        {visibleTracks.map(({ track, position }, rowNumber) => <li key={track.name}>
-          <button className={`music-row ${index === position ? 'is-current' : ''}`} type="button" onClick={() => playTrack(position)} aria-label={`Play ${track.title || title(track.name)}`}>
-            <span className="music-number">{index === position && playing ? <span className="music-equalizer" aria-hidden="true"><i /><i /><i /></span> : rowNumber + 1}</span>
-            <span className="music-track"><CoverArt track={track} folder={folder} /><span><strong>{track.title || title(track.name)}</strong><small>{track.artist || 'Unknown artist'} · {track.album || 'Unknown album'}</small></span></span>
+        {visibleTracks.map(({ track, position }, rowNumber) => <li key={track.id ?? track.name}>
+          <button className={`music-row ${(track.id ? activeID === track.id : index === position) ? 'is-current' : ''}`} type="button" onClick={() => playTrack(position)} aria-label={`Play ${track.title || title(track.name)}`}>
+            <span className="music-number">{(track.id ? activeID === track.id : index === position) && playing ? <span className="music-equalizer" aria-hidden="true"><i /><i /><i /></span> : rowNumber + 1}</span>
+            <span className="music-track"><CoverArt track={track} folder={folder} /><span><strong>{track.title || title(track.name)}</strong><small>{track.artist || 'Unknown artist'} · {track.album || 'Unknown album'}{track.id && personal?.playCounts[track.id] ? ` · ${personal.playCounts[track.id]} plays` : ''}</small></span></span>
             <span className="music-artist">{track.artist || 'Unknown artist'}</span>
             <span className="music-album">{track.album || 'Unknown album'}</span>
             <span className="music-duration">{track.duration > 0 ? time(track.duration) : '—'}</span>
           </button>
         </li>)}
       </ol>
-      {folder && tracks.length === 0 && <p className="music-empty">No supported audio files in this folder.</p>}
+      {catalogMode && hasMore && <button type="button" className="music-load-more" onClick={() => void refreshCatalog(tracks.length)}>Load more songs</button>}
+      {folder && tracks.length === 0 && <p className="music-empty">{catalogMode ? 'Indexing music, or no supported audio files were found.' : 'No supported audio files in this folder.'}</p>}
       {folder && tracks.length > 0 && visibleTracks.length === 0 && <p className="music-empty">No songs match “{query}”.</p>}
       {!folder && !loading && <p className="music-empty">Enter a folder path above to start listening.</p>}
     </div>
     <div className="music-player">
-      <div className="music-now"><CoverArt track={active} folder={folder} large /><span><strong>{active ? active.title || title(active.name) : 'Nothing playing'}</strong><small>{active ? active.artist || 'Unknown artist' : 'Select a track'}</small></span></div>
+      <div className="music-now"><CoverArt track={active} folder={folder} large /><span><strong>{active ? active.title || title(active.name) : 'Nothing playing'}</strong><small>{active ? active.artist || 'Unknown artist' : 'Select a track'}</small></span>{catalogMode && active?.id && <button className="music-like" type="button" aria-label={personal?.favorites.includes(active.id) ? 'Unlike song' : 'Like song'} onClick={() => void toggleFavorite(active)}>{personal?.favorites.includes(active.id) ? '♥' : '♡'}</button>}</div>
       <div className="music-playback">
-        <div className="music-controls"><button type="button" aria-label="Previous track" onClick={() => skip(-1)} disabled={!visibleTracks.length}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M19 5 7 12l12 7z" /></svg></button><button type="button" className="music-play-button" aria-label={playing ? 'Pause' : 'Play'} onClick={() => { if (index < 0) playTrack(visibleTracks[0].position); else if (playing) audio.current?.pause(); else void audio.current?.play().catch(() => setError('This audio format could not be played.')) }} disabled={index < 0 && !visibleTracks.length}>{playing ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M17 5v14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z" /></svg>}</button><button type="button" aria-label="Next track" onClick={() => skip(1)} disabled={!visibleTracks.length}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M5 5l12 7-12 7z" /></svg></button></div>
+        <div className="music-controls">{catalogMode && <button type="button" aria-label="Toggle shuffle" aria-pressed={personal?.player.shuffle ?? false} onClick={() => void toggleMode('shuffle')}>⤨</button>}<button type="button" aria-label="Previous track" onClick={() => skip(-1)} disabled={!visibleTracks.length}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M19 5 7 12l12 7z" /></svg></button><button type="button" className="music-play-button" aria-label={playing ? 'Pause' : 'Play'} onClick={() => { if (!active && visibleTracks.length) playTrack(visibleTracks[0].position); else if (playing) audio.current?.pause(); else void audio.current?.play().catch(() => setError('This audio format could not be played.')) }} disabled={!active && !visibleTracks.length}>{playing ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M17 5v14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z" /></svg>}</button><button type="button" aria-label="Next track" onClick={() => skip(1)} disabled={!visibleTracks.length && !personal?.queue.length}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M5 5l12 7-12 7z" /></svg></button>{catalogMode && <button type="button" aria-label={`Repeat ${personal?.player.repeat ?? 'off'}`} aria-pressed={personal ? personal.player.repeat !== 'off' : false} onClick={() => void toggleMode('repeat')}>↻{personal?.player.repeat === 'one' ? '₁' : ''}</button>}</div>
         <div className="music-timeline"><span>{time(currentTime)}</span><input type="range" aria-label="Seek" min="0" max={duration || 1} step="0.1" value={Math.min(currentTime, duration || 1)} disabled={!active || !duration} onChange={(event) => { if (audio.current) audio.current.currentTime = Number(event.target.value); setCurrentTime(Number(event.target.value)) }} style={{ '--progress': `${duration ? currentTime / duration * 100 : 0}%` } as React.CSSProperties} /><span>{time(duration)}</span></div>
       </div>
-      <div className="music-volume"><button type="button" aria-label={volume === 0 ? 'Unmute' : 'Mute'} title={volume === 0 ? 'Unmute' : 'Mute'} onClick={() => changeVolume(volume === 0 ? lastVolume.current : 0)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9z" />{volume === 0 ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M16 8c2 1 3 2 3 4s-1 3-3 4" />}</svg></button><input type="range" aria-label="Volume" min="0" max="1" step="0.01" value={volume} onChange={(event) => changeVolume(Number(event.target.value))} style={{ '--volume': `${volume * 100}%` } as React.CSSProperties} /></div>
+      <div className="music-player-actions">{catalogMode && <><button type="button" aria-label="Show queue" onClick={() => setShowQueue((value) => !value)}>≡</button>{active?.id && <button type="button" aria-label="Add current song to queue" onClick={() => void setQueue([...(personal?.queue ?? []), active.id!])}>+</button>}</>}<div className="music-volume"><button type="button" aria-label={volume === 0 ? 'Unmute' : 'Mute'} title={volume === 0 ? 'Unmute' : 'Mute'} onClick={() => changeVolume(volume === 0 ? lastVolume.current : 0)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9z" />{volume === 0 ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M16 8c2 1 3 2 3 4s-1 3-3 4" />}</svg></button><input type="range" aria-label="Volume" min="0" max="1" step="0.01" value={volume} onChange={(event) => changeVolume(Number(event.target.value))} style={{ '--volume': `${volume * 100}%` } as React.CSSProperties} /></div></div>
     </div>
-    <audio ref={audio} src={active ? `/api/v1/music/audio?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(active.name)}` : undefined} preload="metadata" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onDurationChange={(event) => setDuration(event.currentTarget.duration)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => skip(1)} onError={() => { if (active) setError('This track could not be loaded or played.') }} />
+    <audio ref={audio} src={active ? active.id ? `/api/v1/music/audio?id=${encodeURIComponent(active.id)}` : `/api/v1/music/audio?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(active.name)}` : undefined} preload="metadata" onLoadedMetadata={(event) => { if (resumePosition > 0) { event.currentTarget.currentTime = Math.min(resumePosition, Math.max(0, event.currentTarget.duration - 1)); setResumePosition(0) } }} onTimeUpdate={(event) => { const position = event.currentTarget.currentTime; setCurrentTime(position); if (catalogMode && active?.id && Date.now() - lastPositionSave.current > 10000) { lastPositionSave.current = Date.now(); void savePlayer(active.id, position) } }} onDurationChange={(event) => setDuration(event.currentTarget.duration)} onPlay={(event) => { setPlaying(true); if (catalogMode && active?.id) void savePlayer(active.id, event.currentTarget.currentTime) }} onPause={(event) => { setPlaying(false); if (catalogMode && active?.id && event.currentTarget.currentSrc && new URL(event.currentTarget.currentSrc).searchParams.get('id') === active.id) void savePlayer(active.id, event.currentTarget.currentTime) }} onEnded={songEnded} onError={() => { if (active) setError('This track could not be loaded or played.') }} />
   </section>
 }

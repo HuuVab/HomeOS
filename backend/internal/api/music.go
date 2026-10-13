@@ -1,11 +1,14 @@
 package api
 
 import (
+	"crypto/subtle"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,12 +24,16 @@ var musicTypes = map[string]string{
 
 func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 	check := func(w http.ResponseWriter, r *http.Request) bool {
-		user, _, _, ok := authenticate(w, r, db)
+		user, csrf, _, ok := authenticate(w, r, db)
 		if !ok {
 			return false
 		}
 		if user.Role != "admin" {
 			writeError(w, http.StatusForbidden, "forbidden", "HomeMusic server folders require an admin account")
+			return false
+		}
+		if r.Method != http.MethodGet && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(csrf)) != 1 {
+			writeError(w, http.StatusForbidden, "invalid_csrf", "Invalid CSRF token")
 			return false
 		}
 		return true
@@ -38,6 +45,17 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 			return "", false
 		}
 		folder = filepath.Clean(folder)
+		if !musicRootAllowed(folder) {
+			writeError(w, http.StatusForbidden, "folder_not_approved", "Music folder is outside approved roots")
+			return "", false
+		}
+		if db.IsPostgres() {
+			library, err := db.MusicLibrary(r.Context())
+			if err != nil || library.Root == "" || !strings.EqualFold(folder, library.Root) {
+				writeError(w, http.StatusForbidden, "folder_not_approved", "Use the configured HomeMusic library")
+				return "", false
+			}
+		}
 		info, err := os.Stat(folder)
 		if err != nil || !info.IsDir() {
 			writeError(w, http.StatusNotFound, "folder_not_found", "Music folder is unavailable")
@@ -45,6 +63,64 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 		}
 		return folder, true
 	}
+	mux.HandleFunc("GET /api/v1/music/library", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r) {
+			return
+		}
+		library, err := db.MusicLibrary(r.Context())
+		if err != nil {
+			writeError(w, 500, "music_library", err.Error())
+			return
+		}
+		writeJSON(w, 200, library)
+	})
+	mux.HandleFunc("GET /api/v1/music/tracks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r) {
+			return
+		}
+		if !db.IsPostgres() {
+			writeError(w, 400, "postgres_required", "Persistent music requires PostgreSQL")
+			return
+		}
+		track, err := approvedMusicTrack(r, db, r.PathValue("id"))
+		if err != nil {
+			writeError(w, 404, "track_not_found", "Track is unavailable")
+			return
+		}
+		writeJSON(w, 200, track)
+	})
+	mux.HandleFunc("POST /api/v1/music/library", func(w http.ResponseWriter, r *http.Request) {
+		if !check(w, r) {
+			return
+		}
+		if !db.IsPostgres() {
+			writeError(w, 400, "postgres_required", "Persistent music requires PostgreSQL")
+			return
+		}
+		var body struct {
+			Root string `json:"root"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil || !filepath.IsAbs(body.Root) {
+			writeError(w, 400, "invalid_path", "Enter an absolute server folder path")
+			return
+		}
+		root := filepath.Clean(body.Root)
+		if !musicRootAllowed(root) {
+			writeError(w, 403, "folder_not_approved", "Music folder is outside approved roots")
+			return
+		}
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			writeError(w, 404, "folder_not_found", "Music folder is unavailable")
+			return
+		}
+		if err := db.SetMusicLibrary(r.Context(), root); err != nil {
+			writeError(w, 500, "music_library", err.Error())
+			return
+		}
+		wakeMusicScanner()
+		writeJSON(w, 200, map[string]string{"root": root})
+	})
 	mux.HandleFunc("GET /api/v1/music/folders", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r) {
 			return
@@ -52,7 +128,16 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 		folder := strings.TrimSpace(r.URL.Query().Get("path"))
 		if folder == "" {
 			roots := make([]map[string]string, 0)
-			if runtime.GOOS == "windows" {
+			if allowed := os.Getenv("HOMEOS_MUSIC_ALLOWED_ROOTS"); allowed != "" {
+				for _, root := range filepath.SplitList(allowed) {
+					if root != "" {
+						root = filepath.Clean(root)
+						if info, err := os.Stat(root); err == nil && info.IsDir() {
+							roots = append(roots, map[string]string{"name": root, "path": root})
+						}
+					}
+				}
+			} else if runtime.GOOS == "windows" {
 				for drive := 'A'; drive <= 'Z'; drive++ {
 					root := string(drive) + `:\`
 					if info, err := os.Stat(root); err == nil && info.IsDir() {
@@ -70,6 +155,10 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 			return
 		}
 		folder = filepath.Clean(folder)
+		if !musicRootAllowed(folder) {
+			writeError(w, 403, "folder_not_approved", "Music folder is outside approved roots")
+			return
+		}
 		items, err := os.ReadDir(folder)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "folder_unavailable", "Cannot browse this folder")
@@ -82,13 +171,43 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 			}
 		}
 		parent := filepath.Dir(folder)
-		if parent == folder {
+		if parent == folder || !musicRootAllowed(parent) {
 			parent = ""
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"path": folder, "parent": parent, "folders": folders})
 	})
 	mux.HandleFunc("GET /api/v1/music", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r) {
+			return
+		}
+		if db.IsPostgres() && r.URL.Query().Get("path") == "" {
+			library, err := db.MusicLibrary(r.Context())
+			if err != nil {
+				writeError(w, 500, "music_library", err.Error())
+				return
+			}
+			if library.Root != "" && !musicRootAllowed(library.Root) {
+				writeError(w, 403, "folder_not_approved", "Music folder is outside approved roots")
+				return
+			}
+			limit := 500
+			offset := 0
+			if v := r.URL.Query().Get("limit"); v != "" {
+				if n, e := strconv.Atoi(v); e == nil {
+					limit = n
+				}
+			}
+			if v := r.URL.Query().Get("offset"); v != "" {
+				if n, e := strconv.Atoi(v); e == nil {
+					offset = n
+				}
+			}
+			tracks, err := db.MusicTracks(r.Context(), library.Root, r.URL.Query().Get("q"), r.URL.Query().Get("artist"), r.URL.Query().Get("album"), r.URL.Query().Get("folder"), r.URL.Query().Get("sort"), r.URL.Query().Get("order") == "desc", limit, offset)
+			if err != nil {
+				writeError(w, 500, "music_tracks", err.Error())
+				return
+			}
+			writeJSON(w, 200, map[string]any{"tracks": tracks, "folder": library.Root, "scanCompletedAt": library.ScanCompletedAt, "scanError": library.ScanError})
 			return
 		}
 		folder, ok := validFolder(w, r)
@@ -137,6 +256,49 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 		if !check(w, r) {
 			return
 		}
+		if id := r.URL.Query().Get("id"); db.IsPostgres() && id != "" {
+			track, err := approvedMusicTrack(r, db, id)
+			if err != nil {
+				writeError(w, 404, "track_not_found", "Track is unavailable")
+				return
+			}
+			library, err := db.MusicLibrary(r.Context())
+			if err != nil {
+				writeError(w, 500, "music_library", "Music library is unavailable")
+				return
+			}
+			root, err := os.OpenRoot(library.Root)
+			if err != nil {
+				writeError(w, 404, "track_not_found", "Track is unavailable")
+				return
+			}
+			defer root.Close()
+			resolvedRoot, err := filepath.EvalSymlinks(library.Root)
+			if err != nil {
+				writeError(w, 404, "track_not_found", "Track is unavailable")
+				return
+			}
+			rel, err := filepath.Rel(resolvedRoot, track.Path)
+			if err != nil {
+				writeError(w, 404, "track_not_found", "Track is unavailable")
+				return
+			}
+			file, err := root.Open(rel)
+			if err != nil {
+				writeError(w, 404, "track_not_found", "Track is unavailable")
+				return
+			}
+			defer file.Close()
+			info, err := file.Stat()
+			if err != nil || !info.Mode().IsRegular() {
+				writeError(w, 404, "track_not_found", "Track is unavailable")
+				return
+			}
+			w.Header().Set("Content-Type", musicTypes[strings.ToLower(filepath.Ext(track.Path))])
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			http.ServeContent(w, r, track.Name, info.ModTime(), file)
+			return
+		}
 		folder, ok := validFolder(w, r)
 		if !ok {
 			return
@@ -147,7 +309,13 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 			writeError(w, http.StatusBadRequest, "invalid_track", "Invalid track")
 			return
 		}
-		file, err := os.Open(filepath.Join(folder, name))
+		root, err := os.OpenRoot(folder)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "folder_not_found", "Music folder is unavailable")
+			return
+		}
+		defer root.Close()
+		file, err := root.Open(name)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "track_not_found", "Track is unavailable")
 			return
@@ -164,6 +332,15 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 	})
 	mux.HandleFunc("GET /api/v1/music/cover", func(w http.ResponseWriter, r *http.Request) {
 		if !check(w, r) {
+			return
+		}
+		if id := r.URL.Query().Get("id"); db.IsPostgres() && id != "" {
+			track, err := approvedMusicTrack(r, db, id)
+			if err != nil {
+				writeError(w, 404, "track_not_found", "Track is unavailable")
+				return
+			}
+			serveMusicCover(w, r, track)
 			return
 		}
 		folder, ok := validFolder(w, r)
@@ -201,4 +378,5 @@ func registerMusicRoutes(mux *http.ServeMux, db *store.Store) {
 		w.Header().Set("Cache-Control", "private, max-age=300")
 		_, _ = w.Write(image)
 	})
+	registerMusicPersonalRoutes(mux, db, check)
 }

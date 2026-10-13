@@ -274,7 +274,7 @@ export default function App() {
       </>}
 
       {activeSection === 'drive' && <Drive csrfToken={session.csrfToken} />}
-      {activeSection === 'music' && <Music />}
+      {activeSection === 'music' && <Music csrfToken={session.csrfToken} />}
 
       {!current.ready && <section className="planned-panel"><span className="planned-badge">Coming soon</span><h2>{current.label} is not active yet</h2><p>{current.description} This page will become its own dashboard as the module is built. No controls are available here yet.</p></section>}
     </main>
