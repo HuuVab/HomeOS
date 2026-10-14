@@ -5,6 +5,7 @@ import Music from './Music'
 type Session = {
   user: { id: number; username: string; displayName: string; role: string }
   csrfToken: string
+  server?: { name: string }
 }
 
 type Metric = {
@@ -45,6 +46,11 @@ const services = [
 function sectionFromHash(): string {
   const id = window.location.hash.replace(/^#\//, '')
   return services.some((service) => service.id === id) ? id : 'overview'
+}
+
+function isLocalServerAddress(): boolean {
+  const host = window.location.hostname.toLowerCase()
+  return host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host)
 }
 
 function formatMetric(metric: Metric): string {
@@ -200,6 +206,8 @@ export default function App() {
 
   const current = services.find((service) => service.id === activeSection) ?? services[0]
   const systemOnline = !error && data?.status === 'healthy'
+  const localAccess = isLocalServerAddress()
+  const serverName = session.server?.name || 'HomeOS server'
   const systemLabel = loading && !data ? 'Checking system' : systemOnline ? 'System online' : 'Status unavailable'
   const summaryValue = (id: string) => {
     if (error) return 'Unavailable'
@@ -244,11 +252,23 @@ export default function App() {
     <main className="main-panel">
       <header className="header">
         <div><p className="eyebrow">{current.group}</p><h1>{current.label}</h1><p className="subtitle">{current.description}</p></div>
-        <div className="header-actions"><span className="version">{session.user.username}</span><button type="button" className="secondary-button" onClick={() => void signOut()}>Sign out</button></div>
+        <div className="header-actions">
+          <div className="connection-identity" title="Local access means this browser opened HomeOS through a loopback address. Account role does not identify the server device.">
+            <span><strong>Server</strong> {serverName}</span>
+            <span><strong>This browser</strong> {localAccess ? 'Local access' : 'Connected device'}</span>
+          </div>
+          <span className="version">{session.user.username}</span>
+          <button type="button" className="secondary-button" onClick={() => void signOut()}>Sign out</button>
+        </div>
       </header>
 
       {activeSection === 'overview' && <>
         {health}
+        <section className="device-context" aria-label="Server and browser">
+          <div><span>HomeOS server</span><strong>{serverName}</strong></div>
+          <div><span>This browser</span><strong>{localAccess ? 'Local access' : 'Connected device'}</strong></div>
+          <p>{localAccess ? 'Opened through a loopback address on this device.' : 'Connected through a network address. Signing in as admin does not make this device the server.'}</p>
+        </section>
         <div className="section-heading"><h2>Services</h2></div>
         <section className="service-grid" aria-label="Available services">
           <article className="service-card"><h3>HomeDrive</h3><p>File storage and folders</p><span className="service-state">Enabled</span><a href="#/drive">Open service</a></article>

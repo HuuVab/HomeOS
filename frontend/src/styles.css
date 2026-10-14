@@ -68,7 +68,9 @@ a.nav-link:hover { background: rgba(255, 255, 255, .04); color: var(--text); }
 .header .eyebrow { margin-bottom: 4px; }
 .eyebrow { color: var(--muted); font-size: 12px; font-weight: 500; }
 .subtitle { margin-top: 4px; color: var(--muted); font-size: 14px; }
-.header-actions { display: flex; align-items: center; gap: 8px; }
+.header-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.connection-identity { display: flex; flex-direction: column; padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--card); color: var(--text); font-size: 12px; line-height: 1.5; }
+.connection-identity strong { color: var(--muted); font-weight: 500; margin-right: 5px; }
 .version { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 .overview, .card, .service-card, .planned-panel, .login-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card); }
@@ -83,6 +85,11 @@ a.nav-link:hover { background: rgba(255, 255, 255, .04); color: var(--text); }
 .status-metrics dt { color: var(--muted); font-size: 12px; }
 .status-metrics dd { margin-top: 4px; color: var(--text); font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
 .status-message { margin-top: 16px; color: var(--error); font-size: 13px; }
+.device-context { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.device-context div { display: flex; flex-direction: column; min-width: 150px; }
+.device-context span, .device-context p { color: var(--muted); font-size: 12px; }
+.device-context strong { font-size: 15px; overflow-wrap: anywhere; }
+.device-context p { flex: 1 1 260px; }
 .section-heading { margin: var(--space-4) 0 var(--space-2); }
 .section-heading h2 { font-size: 22px; }
 
@@ -165,6 +172,7 @@ form > input { margin-bottom: 16px; }
 
 @media (max-width: 480px) {
   .header { flex-direction: column; gap: 16px; }
+  .header-actions { justify-content: flex-start; }
   .status-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
   .status-metrics { gap: 16px 8px; }
   .drive-action-row { flex-direction: column; }

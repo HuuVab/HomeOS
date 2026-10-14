@@ -77,6 +77,7 @@ func (testCollector) Collect(context.Context) []monitor.Metric {
 }
 
 func TestAuthenticationAndStatus(t *testing.T) {
+	t.Setenv("HOMEOS_SERVER_NAME", "test-server")
 	handler, _ := testHandler(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
 	response := httptest.NewRecorder()
@@ -98,12 +99,28 @@ func TestAuthenticationAndStatus(t *testing.T) {
 	}
 	var session struct {
 		CSRFToken string `json:"csrfToken"`
+		Server    struct {
+			Name string `json:"name"`
+		} `json:"server"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &session); err != nil {
 		t.Fatal(err)
 	}
 	if session.CSRFToken == "" {
 		t.Fatal("missing CSRF token")
+	}
+	if session.Server.Name != "test-server" {
+		t.Fatalf("login server = %q", session.Server.Name)
+	}
+	me := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	me.AddCookie(cookies[0])
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, me)
+	if response.Code != http.StatusOK {
+		t.Fatalf("session status = %d", response.Code)
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &session); err != nil || session.Server.Name != "test-server" {
+		t.Fatalf("session server = %q, error = %v", session.Server.Name, err)
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)

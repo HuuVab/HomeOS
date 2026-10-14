@@ -11,6 +11,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -116,12 +118,12 @@ func registerAuthRoutes(mux *http.ServeMux, db *store.Store, accelerator *redisa
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: 24 * 60 * 60})
-		writeJSON(w, http.StatusOK, map[string]any{"user": user, "csrfToken": csrfToken})
+		writeJSON(w, http.StatusOK, sessionResponse(user, csrfToken))
 	})
 	mux.HandleFunc("GET /api/v1/auth/me", func(w http.ResponseWriter, r *http.Request) {
 		user, csrfToken, _, ok := authenticate(w, r, db)
 		if ok {
-			writeJSON(w, http.StatusOK, map[string]any{"user": user, "csrfToken": csrfToken})
+			writeJSON(w, http.StatusOK, sessionResponse(user, csrfToken))
 		}
 	})
 	mux.HandleFunc("POST /api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +142,20 @@ func registerAuthRoutes(mux *http.ServeMux, db *store.Store, accelerator *redisa
 		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: -1})
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+func sessionResponse(user store.User, csrfToken string) map[string]any {
+	name := strings.TrimSpace(os.Getenv("HOMEOS_SERVER_NAME"))
+	if name == "" {
+		name, _ = os.Hostname()
+	}
+	if name == "" {
+		name = "HomeOS server"
+	}
+	return map[string]any{
+		"user": user, "csrfToken": csrfToken,
+		"server": map[string]string{"name": name},
+	}
 }
 
 func authenticate(w http.ResponseWriter, r *http.Request, db *store.Store) (store.User, string, string, bool) {
