@@ -44,8 +44,14 @@ const services = [
 ] as const
 
 function sectionFromHash(): string {
+  if (isMobileClient()) return 'music'
   const id = window.location.hash.replace(/^#\//, '')
   return services.some((service) => service.id === id) ? id : 'overview'
+}
+
+function isMobileClient(): boolean {
+  return /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 }
 
 function isLocalServerAddress(): boolean {
@@ -67,6 +73,7 @@ function formatMetric(metric: Metric): string {
 }
 
 export default function App() {
+	const mobileClient = isMobileClient()
 	const [session, setSession] = useState<Session | null>(null)
 	const [checkingSession, setCheckingSession] = useState(true)
 	const [username, setUsername] = useState('')
@@ -85,12 +92,14 @@ export default function App() {
 
   useEffect(() => {
     const onHashChange = () => {
+      if (mobileClient && window.location.hash !== '#/music') window.history.replaceState(null, '', '#/music')
       setActiveSection(sectionFromHash())
       setNavOpen(false)
     }
+    if (mobileClient && window.location.hash !== '#/music') window.history.replaceState(null, '', '#/music')
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
-  }, [])
+  }, [mobileClient])
 
   const refresh = useCallback(async () => {
     if (activeRequest.current) return
@@ -134,7 +143,7 @@ export default function App() {
 	}, [])
 
   useEffect(() => {
-	if (!session) return
+	if (!session || mobileClient) return
     void refresh()
     const timer = window.setInterval(() => void refresh(), 1_000)
     return () => {
@@ -142,7 +151,7 @@ export default function App() {
       activeRequest.current?.abort()
       activeRequest.current = null
     }
-  }, [refresh, session])
+  }, [refresh, session, mobileClient])
 
 	async function signIn(event: FormEvent<HTMLFormElement>) {
 	  event.preventDefault()
@@ -203,6 +212,11 @@ export default function App() {
 	    </section>
 	  </main>
 	)
+
+  if (mobileClient) return <main className="mobile-music-main">
+    <header className="mobile-music-header"><h1>HomeMusic</h1><button type="button" className="secondary-button" onClick={() => void signOut()}>Sign out</button></header>
+    <Music csrfToken={session.csrfToken} userId={session.user.id} />
+  </main>
 
   const current = services.find((service) => service.id === activeSection) ?? services[0]
   const systemOnline = !error && data?.status === 'healthy'

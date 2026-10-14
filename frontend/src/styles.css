@@ -63,6 +63,10 @@ a.nav-link:hover { background: rgba(255, 255, 255, .04); color: var(--text); }
 .nav-unavailable { opacity: .4; cursor: not-allowed; }
 
 .main-panel { width: 100%; min-width: 0; max-width: 1440px; margin: 0 auto; padding: var(--space-3) var(--space-4) var(--space-4); }
+.mobile-music-main { min-height: 100dvh; padding: 12px 12px 0; }
+.mobile-music-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.mobile-music-header h1 { font-size: 22px; }
+.mobile-music-header button { min-height: 34px; padding: 5px 10px; font-size: 12px; }
 .header, .section-heading, .card-top, footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .header { align-items: flex-start; margin-bottom: var(--space-3); }
 .header .eyebrow { margin-bottom: 4px; }
