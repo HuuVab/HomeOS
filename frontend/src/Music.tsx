@@ -92,6 +92,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(0.8)
+  const [useDeviceVolume, setUseDeviceVolume] = useState(() => window.matchMedia('(max-width: 600px)').matches)
   const [autoLevel, setAutoLevel] = useState(() => localStorage.getItem('homeos.music.autoLevel') !== 'off')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -128,6 +129,18 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
 
   useEffect(() => () => { void audioContext.current?.close() }, [])
   useEffect(() => {
+    const media = window.matchMedia('(max-width: 600px)')
+    const update = () => setUseDeviceVolume(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  useEffect(() => {
+    const outputVolume = useDeviceVolume ? 1 : volume
+    if (masterGain.current) masterGain.current.gain.value = outputVolume
+    else if (audio.current) audio.current.volume = outputVolume
+  }, [useDeviceVolume, volume])
+  useEffect(() => {
     const gain = normalizationGain.current?.gain
     const context = audioContext.current
     if (!gain || !context) return
@@ -138,7 +151,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
     // iOS treats Web Audio as ambient unless the page opts into media playback.
     enablePlaybackAudioSession()
     if (audioContext.current) { void audioContext.current.resume(); return }
-    if (!audio.current || !window.AudioContext) { if (audio.current) audio.current.volume = volume; return }
+    if (!audio.current || !window.AudioContext) { if (audio.current) audio.current.volume = useDeviceVolume ? 1 : volume; return }
     try {
       const context = new AudioContext()
       const source = context.createMediaElementSource(audio.current)
@@ -152,13 +165,13 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
       compressor.release.value = 0.25
       gain.gain.value = normalizationFactor(active, autoLevel, catalogMode)
       source.connect(gain).connect(compressor).connect(master).connect(context.destination)
-      master.gain.value = volume
+      master.gain.value = useDeviceVolume ? 1 : volume
       audio.current.volume = 1
       audioContext.current = context
       normalizationGain.current = gain
       masterGain.current = master
       void context.resume()
-    } catch { if (audio.current) audio.current.volume = volume }
+    } catch { if (audio.current) audio.current.volume = useDeviceVolume ? 1 : volume }
   }
   useEffect(() => {
     void (async () => {
@@ -318,8 +331,8 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   function changeVolume(next: number) {
     setVolume(next)
     if (next > 0) lastVolume.current = next
-    if (masterGain.current) masterGain.current.gain.value = next
-    else if (audio.current) audio.current.volume = next
+    if (masterGain.current) masterGain.current.gain.value = useDeviceVolume ? 1 : next
+    else if (audio.current) audio.current.volume = useDeviceVolume ? 1 : next
   }
 
   async function loadFolder(next: string) {

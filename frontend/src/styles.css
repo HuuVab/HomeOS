@@ -528,6 +528,7 @@ form > input { margin-bottom: 16px; }
   .music[data-mobile-view="search"][data-search-empty="true"] .music-empty { display: none; }
   .music[data-mobile-view="search"][data-search-empty="true"] .music-mobile-search-prompt { display: block; margin: 24px 16px; color: #a6abb3; font-size: 13px; }
   .music-player { position: fixed; right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); left: 0; z-index: 20; box-shadow: 0 -10px 30px rgba(0, 0, 0, .3); }
+  .music-player-actions .music-volume { display: none; }
   .music-mobile-nav { position: fixed; right: 0; bottom: 0; left: 0; z-index: 21; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid #303136; background: #171719; }
   .music-mobile-nav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 48px; border: 0; border-radius: 9px; background: transparent; color: #aeb5be; font-size: 12px; font-weight: 600; }
   .music-mobile-nav button span { font-size: 23px; line-height: 1; }
