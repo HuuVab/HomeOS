@@ -66,7 +66,6 @@ export default function Drive({ csrfToken }: Props) {
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([])
   const [storage, setStorage] = useState<StorageUsage | null>(null)
   const [query, setQuery] = useState('')
-  const [mobileTab, setMobileTab] = useState<'list' | 'search'>('list')
   const [searchEntries, setSearchEntries] = useState<Entry[]>([])
   const [searching, setSearching] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -88,7 +87,6 @@ export default function Drive({ csrfToken }: Props) {
   const [versions, setVersions] = useState<FileVersion[] | null>(null)
   const [versionError, setVersionError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch(`/api/v1/drive?path=${encodeURIComponent(folder)}`, { cache: 'no-store', signal })
@@ -178,14 +176,7 @@ export default function Drive({ csrfToken }: Props) {
     setSelected((current) => { const next = new Set(current); if (next.has(path)) next.delete(path); else next.add(path); return next })
   }
 
-  function navigate(path: string) { setFolder(path); setQuery(''); setMobileTab('list'); setSelected(new Set()); setInspected(null); setOpenMenu(null) }
-  function selectMobileTab(tab: 'list' | 'search') {
-    setMobileTab(tab)
-    setShowTrash(false)
-    setOpenMenu(null)
-    if (tab === 'list') setQuery('')
-    else window.requestAnimationFrame(() => searchRef.current?.focus())
-  }
+  function navigate(path: string) { setFolder(path); setQuery(''); setSelected(new Set()); setInspected(null); setOpenMenu(null) }
   function openEntry(entry: Entry) { if (entry.kind === 'folder') navigate(entry.path); else setInspected(entry) }
 
   async function mutate(endpoint: string, payload: object, version?: number): Promise<void> {
@@ -303,9 +294,9 @@ export default function Drive({ csrfToken }: Props) {
   const fileCount = visible.filter((entry) => entry.kind === 'file').length
   const folderCount = visible.length - fileCount
 
-  return <section className="drive" aria-label="HomeDrive" data-mobile-tab={mobileTab} data-search-empty={!query.trim()} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragActive(true) } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false) }} onDrop={onDrop}>
+  return <section className="drive" aria-label="HomeDrive" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragActive(true) } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false) }} onDrop={onDrop}>
     {dragActive && <div className="drive-drop-overlay" aria-hidden="true">Drop files to upload</div>}
-    <div className="drive-searchbar"><span aria-hidden="true">⌕</span><input ref={searchRef} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search files across HomeDrive" aria-label="Search files across HomeDrive" /></div>
+    <div className="drive-searchbar"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search files across HomeDrive" aria-label="Search files across HomeDrive" /></div>
     <div className="drive-toolbar">
       <div className="drive-toolbar-left">
         <div className="drive-new-wrap"><button className="drive-new-button" type="button" onClick={() => setNewMenu(!newMenu)}>＋ New</button>{newMenu && <div className="drive-popover"><button type="button" onClick={() => void createFolder()}>New folder</button><button type="button" onClick={() => { setNewMenu(false); inputRef.current?.click() }}>Upload files</button></div>}</div>
@@ -324,7 +315,6 @@ export default function Drive({ csrfToken }: Props) {
     {storage && <div className="drive-storage"><span>{bytes(storage.usedBytes)} used{storage.unlimited ? ' · Unlimited storage' : ` of ${bytes(storage.quotaBytes)}`}</span>{!storage.unlimited && <progress max={storage.quotaBytes} value={Math.min(storage.usedBytes + storage.reservedBytes, storage.quotaBytes)} aria-label="Storage used" />}<span>{storage.unlimited ? 'No HomeDrive file-size cap' : `Max file ${bytes(storage.maxFileBytes)}`}</span></div>}
     {uploads.length > 0 && <div className="drive-upload-tray"><span>{uploads.length} file{uploads.length === 1 ? '' : 's'} ready{uploadName ? ` · ${uploadName}` : ''}</span>{progress !== null && <progress max={1} value={progress} aria-label="Upload progress" />}<button type="button" disabled={busy} onClick={() => void uploadFiles()}>{busy ? 'Uploading…' : 'Upload / Resume'}</button>{!busy && <button type="button" className="drive-quiet-button" onClick={() => setUploads([])}>Clear</button>}</div>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <p className="drive-mobile-search-prompt">Search files and folders across HomeDrive.</p>
     {showTrash ? <div className="drive-content"><div className="drive-section-title"><h2>Trash</h2><span>Deleted items are kept for 30 days by default</span></div>{trashEntries.length === 0 ? <p className="drive-empty">Trash is empty.</p> : <div className="drive-trash-list">{trashEntries.map((entry) => <div className="drive-trash-row" key={entry.id}><span className="drive-item-name">/{entry.path}</span><span className="drive-muted">{entry.deletedAt ? modified(entry.deletedAt) : ''}</span><button type="button" disabled={busy} onClick={() => void restore(entry, false)}>Restore</button><button type="button" disabled={busy} onClick={() => void restore(entry, true)}>Delete forever</button></div>)}</div>}</div> : <div className="drive-content">
       {!query && quickAccess.length > 0 && <section className="drive-quick" aria-label="Quick access"><h2>Quick access</h2><div className="drive-quick-grid">{quickAccess.map((entry) => <button type="button" className="drive-quick-item" key={entry.path} onClick={() => openEntry(entry)}><EntryIcon entry={entry} /><span><strong title={entry.name}>{entry.name}</strong><small>Updated {modified(entry.modifiedAt)}</small></span></button>)}</div></section>}
       <div className="drive-section-title"><h2>{query ? 'Search results' : folder ? folder.split('/').at(-1) : 'All files'}</h2><span>{visible.length} items</span></div>
@@ -333,9 +323,5 @@ export default function Drive({ csrfToken }: Props) {
       <div className="drive-footer"><span>{fileCount} files · {folderCount} folders</span><span>{bytes(visible.filter((entry) => entry.kind === 'file').reduce((sum, entry) => sum + entry.size, 0))}</span></div>
     </div>}
     {inspected && <div className="drive-inspector-backdrop" onClick={() => setInspected(null)}><aside className="drive-inspector" onClick={(event) => event.stopPropagation()} aria-label="File details"><div className="drive-inspector-head"><h2>{inspected.name}</h2><button type="button" className="drive-icon-button" aria-label="Close details" onClick={() => setInspected(null)}>×</button></div><div className="drive-inspector-preview">{imageFile.test(inspected.name) ? <img src={previewURL} alt={inspected.name} /> : /\.pdf$/i.test(inspected.name) ? <iframe title={`Preview ${inspected.name}`} src={previewURL} /> : textFile.test(inspected.name) ? <pre>{previewText ?? 'Loading preview…'}</pre> : <EntryIcon entry={inspected} />}</div><dl><dt>Location</dt><dd>/{inspected.path}</dd><dt>Type</dt><dd>{fileType(inspected)}</dd><dt>Size</dt><dd>{inspected.kind === 'folder' ? 'Folder' : bytes(inspected.size)}</dd><dt>Modified</dt><dd>{new Date(inspected.modifiedAt).toLocaleString()}</dd></dl>{inspected.kind === 'file' && <><a className="drive-download" href={`/api/v1/drive/files?path=${encodeURIComponent(inspected.path)}`}>Download</a><section className="drive-versions" aria-label="Version history"><h3>Version history</h3>{versionError ? <p role="alert">{versionError}</p> : versions === null ? <p>Loading versions…</p> : versions.length === 0 ? <p>No saved versions yet.</p> : <ul>{versions.map((version) => <li key={version.version}><span><strong>Version {version.version}{version.version === inspected.version ? ' · Current' : ''}</strong><small>{bytes(version.size)} · {new Date(version.createdAt * 1000).toLocaleString()}</small></span><button type="button" disabled={busy || version.version === inspected.version} onClick={() => void restoreVersion(inspected, version)}>Restore</button></li>)}</ul>}</section></>}</aside></div>}
-    <nav className="drive-mobile-nav" aria-label="HomeDrive mobile navigation">
-      <button type="button" className={mobileTab === 'list' ? 'active' : ''} aria-current={mobileTab === 'list' ? 'page' : undefined} onClick={() => selectMobileTab('list')}><span aria-hidden="true">☷</span>List</button>
-      <button type="button" className={mobileTab === 'search' ? 'active' : ''} aria-current={mobileTab === 'search' ? 'page' : undefined} onClick={() => selectMobileTab('search')}><span aria-hidden="true">⌕</span>Search</button>
-    </nav>
   </section>
 }
