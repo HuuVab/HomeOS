@@ -6,6 +6,7 @@ type SortKey = 'title' | 'artist' | 'duration'
 type Playlist = { id: string; name: string; trackIds: string[] }
 type Personal = { favorites: string[]; recent: Track[]; playCounts: Record<string, number>; playlists: Playlist[]; queue: string[]; player: { trackId: string; position: number; shuffle: boolean; repeat: 'off' | 'all' | 'one' } }
 type MusicCache = { root: string; tracks: Track[]; hasMore: boolean; scanError: string }
+type MobileAccount = { username: string; displayName: string; role: string; serverName: string; browserLabel: string }
 
 function musicCacheKey(userId: number) { return `homeos.music.catalog.v1.${userId}` }
 function readMusicCache(userId: number): MusicCache | null {
@@ -59,7 +60,7 @@ function CoverArt({ track, folder, large = false }: { track?: Track; folder: str
   return <span className="music-art" aria-hidden="true">♫{source && <img key={source} src={source} alt="" loading={large ? 'eager' : 'lazy'} onError={(event) => { event.currentTarget.hidden = true }} />}</span>
 }
 
-export default function Music({ csrfToken, userId }: { csrfToken: string; userId: number }) {
+export default function Music({ csrfToken, userId, mobileAccount, onSignOut }: { csrfToken: string; userId: number; mobileAccount?: MobileAccount; onSignOut?: () => void }) {
   const [cached] = useState(() => readMusicCache(userId))
   const [path, setPath] = useState(() => cached?.root || localStorage.getItem('homeos.music.path') || '')
   const [folder, setFolder] = useState(() => cached?.root ?? '')
@@ -82,7 +83,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
   const [playNonce, setPlayNonce] = useState(0)
   const [resumePosition, setResumePosition] = useState(0)
   const [query, setQuery] = useState('')
-  const [mobileView, setMobileView] = useState<'list' | 'search'>('list')
+  const [mobileView, setMobileView] = useState<'list' | 'search' | 'account'>('list')
   const [sortBy, setSortBy] = useState<SortKey | null>(null)
   const [sortDescending, setSortDescending] = useState(false)
   const [showFolderPicker, setShowFolderPicker] = useState(() => !cached?.root && !localStorage.getItem('homeos.music.path'))
@@ -557,7 +558,7 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
     await savePlayer(activeID, currentTime, next)
   }
 
-  function selectMobileView(view: 'list' | 'search') {
+  function selectMobileView(view: 'list' | 'search' | 'account') {
     setMobileView(view)
     if (view === 'list') setQuery('')
     else window.requestAnimationFrame(() => searchInput.current?.focus())
@@ -565,6 +566,17 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
 
   return <section className="music" aria-label="HomeMusic player" data-mobile-view={mobileView} data-search-empty={!query.trim()} data-player-visible={playerRevealed && Boolean(active)}>
     <div className="music-library">
+      {mobileAccount && <section className="music-mobile-account" aria-label="Account details">
+        <h2>Account</h2>
+        <dl>
+          <div><dt>Name</dt><dd>{mobileAccount.displayName || mobileAccount.username}</dd></div>
+          <div><dt>Username</dt><dd>{mobileAccount.username}</dd></div>
+          <div><dt>Role</dt><dd>{mobileAccount.role}</dd></div>
+          <div><dt>Server</dt><dd>{mobileAccount.serverName}</dd></div>
+          <div><dt>This browser</dt><dd>{mobileAccount.browserLabel}</dd></div>
+        </dl>
+        <button type="button" className="secondary-button" onClick={onSignOut}>Sign out</button>
+      </section>}
       {showFolderPicker && <form className="music-folder-form" onSubmit={(event) => void load(event)}>
         <label htmlFor="music-folder">Server music folder</label>
         <div><input id="music-folder" value={path} onChange={(event) => setPath(event.target.value)} placeholder="C:\Music or /media/music" spellCheck={false} /><button type="button" className="secondary-button" onClick={() => void browse(path.trim())}>Browse folders</button><button type="submit" disabled={loading || !path.trim()}>{loading ? 'Loading…' : 'Load music'}</button></div>
@@ -634,9 +646,10 @@ export default function Music({ csrfToken, userId }: { csrfToken: string; userId
       <div className="music-player-actions">{catalogMode && <><button type="button" aria-label="Show queue" onClick={() => setShowQueue((value) => !value)}>≡</button>{active?.id && <button type="button" aria-label="Add current song to queue" onClick={() => void setQueue([...(personal?.queue ?? []), active.id!])}>+</button>}<button type="button" className="music-auto-level" aria-label="Auto level" aria-pressed={autoLevel} title={autoLevel ? active?.id && active.loudnessLufs == null ? 'Auto level on; measuring this song in the background' : 'Auto level on' : 'Auto level off'} onClick={() => { setAutoLevel((current) => { localStorage.setItem('homeos.music.autoLevel', current ? 'off' : 'on'); return !current }) }}>Auto</button></>}<div className="music-volume"><button type="button" aria-label={volume === 0 ? 'Unmute' : 'Mute'} title={volume === 0 ? 'Unmute' : 'Mute'} onClick={() => changeVolume(volume === 0 ? lastVolume.current : 0)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9z" />{volume === 0 ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M16 8c2 1 3 2 3 4s-1 3-3 4" />}</svg></button><input type="range" aria-label="Volume" min="0" max="1" step="0.01" value={volume} onChange={(event) => changeVolume(Number(event.target.value))} style={{ '--volume': `${volume * 100}%` } as React.CSSProperties} /></div></div>
     </div>
     <audio ref={audio} src={active ? active.id ? `/api/v1/music/audio?id=${encodeURIComponent(active.id)}` : `/api/v1/music/audio?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(active.name)}` : undefined} preload="metadata" onLoadedMetadata={(event) => { if (resumePosition > 0) { event.currentTarget.currentTime = Math.min(resumePosition, Math.max(0, event.currentTarget.duration - 1)); setResumePosition(0) } }} onTimeUpdate={(event) => { const position = event.currentTarget.currentTime; setCurrentTime(position); if (catalogMode && active?.id && active.id !== deletedTrackID.current && Date.now() - lastPositionSave.current > 10000) { lastPositionSave.current = Date.now(); void savePlayer(active.id, position) } }} onDurationChange={(event) => setDuration(event.currentTarget.duration)} onPlay={(event) => { setPlaying(true); setPlayerRevealed(true); if (catalogMode && active?.id && active.id !== deletedTrackID.current) void savePlayer(active.id, event.currentTarget.currentTime) }} onPause={(event) => { setPlaying(false); if (catalogMode && active?.id && active.id !== deletedTrackID.current && event.currentTarget.currentSrc && new URL(event.currentTarget.currentSrc).searchParams.get('id') === active.id) void savePlayer(active.id, event.currentTarget.currentTime) }} onEnded={songEnded} onError={() => { if (active) setError('This track could not be loaded or played.') }} />
-    <nav className="music-mobile-nav" aria-label="HomeMusic mobile navigation">
+    <nav className={`music-mobile-nav ${mobileAccount ? '' : 'has-two-tabs'}`} aria-label="HomeMusic mobile navigation">
       <button type="button" className={mobileView === 'list' ? 'active' : ''} aria-current={mobileView === 'list' ? 'page' : undefined} onClick={() => selectMobileView('list')}><span aria-hidden="true">☷</span>List</button>
       <button type="button" className={mobileView === 'search' ? 'active' : ''} aria-current={mobileView === 'search' ? 'page' : undefined} onClick={() => selectMobileView('search')}><span aria-hidden="true">⌕</span>Search</button>
+      {mobileAccount && <button type="button" className={mobileView === 'account' ? 'active' : ''} aria-current={mobileView === 'account' ? 'page' : undefined} onClick={() => selectMobileView('account')}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" /></svg>Account</button>}
     </nav>
   </section>
 }

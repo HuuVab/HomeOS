@@ -214,8 +214,19 @@ export default function App() {
 	)
 
   if (mobileClient) return <main className="mobile-music-main">
-    <header className="mobile-music-header"><h1>HomeMusic</h1><button type="button" className="secondary-button" onClick={() => void signOut()}>Sign out</button></header>
-    <Music csrfToken={session.csrfToken} userId={session.user.id} />
+    <header className="mobile-music-header"><h1>HomeMusic</h1></header>
+    <Music
+      csrfToken={session.csrfToken}
+      userId={session.user.id}
+      mobileAccount={{
+        username: session.user.username,
+        displayName: session.user.displayName,
+        role: session.user.role,
+        serverName: session.server?.name || 'HomeOS server',
+        browserLabel: isLocalServerAddress() ? 'Local access' : 'Connected device',
+      }}
+      onSignOut={() => void signOut()}
+    />
   </main>
 
   const current = services.find((service) => service.id === activeSection) ?? services[0]
