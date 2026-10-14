@@ -187,6 +187,7 @@ form > input { margin-bottom: 16px; }
 .drive-searchbar > span { font-size: 26px; line-height: 1; }
 .drive-searchbar input { height: 44px; min-height: 0; padding: 0; border: 0; outline: 0; background: transparent; color: #eef4ff; }
 .drive-searchbar input::placeholder { color: #98a2b8; }
+.drive-mobile-nav, .drive-mobile-search-prompt { display: none; }
 .drive-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; padding: 4px 16px 12px; border-bottom: 1px solid #292a2f; }
 .drive-toolbar-left, .drive-toolbar-right { display: flex; align-items: center; gap: 10px; }
 .drive-toolbar-right { margin-left: auto; }
@@ -290,6 +291,17 @@ form > input { margin-bottom: 16px; }
   .drive-quick-grid { gap: 4px 10px; }
 }
 @media (max-width: 600px) {
+  .drive { min-height: 0; padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
+  .drive[data-mobile-tab="list"] .drive-searchbar { display: none; }
+  .drive[data-mobile-tab="search"] .drive-toolbar-left,
+  .drive[data-mobile-tab="search"] .drive-breadcrumbs,
+  .drive[data-mobile-tab="search"] .drive-storage { display: none; }
+  .drive[data-mobile-tab="search"][data-search-empty="true"] .drive-content { display: none; }
+  .drive[data-mobile-tab="search"][data-search-empty="true"] .drive-mobile-search-prompt { display: block; margin: 24px 16px; color: #a6abb3; font-size: 13px; }
+  .drive-mobile-nav { position: fixed; right: 0; bottom: 0; left: 0; z-index: 20; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid #303136; background: #171719; box-shadow: 0 -10px 30px rgba(0, 0, 0, .3); }
+  .drive-mobile-nav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 48px; border: 0; border-radius: 9px; background: transparent; color: #aeb5be; font-size: 12px; font-weight: 600; }
+  .drive-mobile-nav button span { font-size: 23px; line-height: 1; }
+  .drive-mobile-nav button.active { background: #1c3445; color: #69c5f6; }
   .drive-toolbar { align-items: flex-start; flex-wrap: wrap; }
   .drive-toolbar-right { width: 100%; justify-content: flex-end; }
   .drive-searchbar { margin: 10px; }
